@@ -88,10 +88,11 @@ Results on the current map (your `toledo_poblacion.html` package, 422 OSM buildi
 
 | Run | Result |
 |---|---|
-| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~60 game minutes, 231 infected killed, 4 losses, 16 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
+| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~59 game minutes, 237 infected killed, 2 losses, 19 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
 | Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~67 game minutes (389 infected killed, 16 losses), all 19 survivors evacuated |
 | Systems check (`npm run test:systems`) | vehicles drive and carry passengers; engineer-built sandbags + MG emplacement stop a horde; artillery strike; debrief → strategic map with Toledo green and the next operation unlocked; 0 errors |
 | Phones (`npm run test:mobile`) | Android-sized landscape and portrait layouts with the squad chips and 14 commands; tap select works; 0 errors |
+| Animation steadiness (`npm run test:anim`) | **8/8 checks pass.** A squad marches a square, turns about and fights; on every step: every view change goes to the next view (no snapping), no back-and-forth within 0.25 s, walking straight never changes view, the walk cycle advances with distance (no foot sliding), walk/run switch only with real changes of pace, the muzzle flash shows only right after a shot, every requested frame exists |
 | Formations (`npm run test:formations`) | **20/20 checks pass, 0 page errors** — the 10 scenarios of the spec plus corpse-pile climbing, defensive positions, player commands and all six shapes (details below) |
 
 Formation scenarios (`test/formations.mjs`, each on a fresh squad at the landing zone):
@@ -143,20 +144,26 @@ run by the automated test.
   logistics with stock 0 and is locked behind a campaign flag.
 * **Strategic map coastlines.** Operation markers sit at real coordinates, but island outlines are not
   drawn. Natural Earth data could be added.
-* **Art.** Soldiers and infected use your sprite sheets (see `docs/ASSETS.md`). Riflemen and soldiers
-  who turn into infected have full 8-direction sheets (walk, aim, fire, death / walk, grab, death).
-  The other infantry classes still use the earlier sheets. The Abomination,
+* **Art.** Every infantry class uses your soldier collection sheet (walk, run, idle, firing standing and
+  on the move; see `docs/ASSETS.md`). Deaths use the 8-direction rifleman sheet, soldiers who turn into
+  infected the 8-direction infected-soldier sheet, other infected the earlier infected sheet.
+* **What the soldier sheet doesn't have.** Its direction labels don't match the drawings, so frames
+  were re-sorted by the way they really face. What is truly drawn: walk front / front-right /
+  back-right / back, run front-right / back-right / back, firing front-right and back-right (standing
+  and moving), idle front / front-right / back-right / back; left-facing views are mirrors. So:
+  right and left use the three-quarter front view (no profile), a soldier firing straight at or away
+  from the camera uses the nearest three-quarter view, running toward the camera uses the front walk
+  frames at running pace. Cycles are as drawn: 4 frames for walk, run and firing (3 for walking
+  back-right), 2 for idle — fewer than the 8–12 your spec asks for. There are no death, reload or
+  kneeling frames (reload shows idle, kneeling positions show the aim pose). Frames are about 67 px
+  tall, so close zoom looks soft. The Abomination,
   living civilians, vehicles and defences are still code-generated low-poly models. Buildings use the
   procedural Philippine archetypes from the Toledo map engine.
-* **Sprite directions are approximate for everyone except riflemen and turned soldiers.** The earlier
-  sheets' direction labels don't match the drawings. That art has front, three-quarter front, side and
-  back views, so the game draws eight directions from those (west = east mirrored). There is no walk
-  cycle from behind: a soldier walking away from the camera uses the two back frames with a step bob,
-  and a diagonal away from the camera uses the side cycle.
-* **Riflemen have no reload or kneel frames** in their 8-direction sheet: they reload standing at ease
-  and stand with the rifle up where other classes kneel.
-  Infected have no back walk either. All classes other than the rifleman share one soldier look;
-  bloater, brute, screamer and mutant are the walker art tinted and scaled.
+* **Infected directions are approximate.** The infected sheet has front, three-quarter front, side
+  and back views, so the game draws eight directions from those (west = east mirrored); there is no
+  walk cycle from behind.
+  All infantry classes share one soldier look; bloater, brute, screamer and mutant are the walker art
+  tinted and scaled.
 * **Infection has no cure.** Medics heal wounds, not bites. Once infected, a soldier will turn.
 * **Corpse piles don't block shots.** Piles slow movement and let the infected climb defences, but
   bullets and line of sight pass over them. The infected cannot climb walls, gates, bunkers or towers.

@@ -235,3 +235,133 @@ for d in DIRS8:
     S8.add("z_walk_" + d, ZS[d][0:5]); S8.add("z_attack_" + d, ZS[d][5:7]); S8.add("z_die_" + d, ZS[d][7:10])
 S8.save(os.path.join(OUT, "soldier8.png"), os.path.join(OUT, "soldier8.json"),
         "user-supplied 8-direction sheets 8088.png (rifleman) and 8089.png (infected soldier); tools/slice_sprites.py", STAND8)
+
+
+# ---------------------------------------------------------------- infantry collection sheet
+# assets/source/infantry_8dir_collection.png ("Military_Soldier_Sprite_Sheet_Collection_1.png") has five
+# labelled panels (walk, run, fire standing, fire moving, idle) on a dark textured background. Its
+# direction labels do not match the drawings: run and firing frames nearly all face right, and some
+# walk columns change from facing the camera to facing away half way down. So frames are assigned by
+# the direction they really face (table below), left-facing views are mirrors, and the clips get:
+#   * background removal (flood fill from the cell border; the near-black rifle is kept in the upper
+#     body, the foot shadow is dropped),
+#   * one height per clip (the sheet's bottom rows are drawn ~8 % taller, its idle figures ~14 % smaller),
+#   * a stable anchor between head and hips (so a step does not shift the whole figure),
+#   * muzzle-flash-free copies of the firing frames, for aiming between shots.
+COL_SRC = os.path.join(ROOT, "assets/source/infantry_8dir_collection.png")
+CA = np.asarray(Image.open(COL_SRC).convert("RGB")).astype(int)
+C_LB = [12, 108, 200, 289, 380, 474, 570, 664, 758]
+C_RB = [780, 872, 963, 1054, 1150, 1243, 1333, 1426, 1525]
+C_ROWS = {"walk": [(88, 162), (162, 236), (236, 310), (310, 390)], "run": [(88, 162), (162, 236), (236, 310), (310, 390)],
+          "fstand": [(484, 557), (557, 630), (630, 704), (704, 781)], "fmove": [(478, 558), (558, 630), (630, 703), (703, 779)],
+          "idle": [(866, 940), (942, 1006)]}
+C_SIDE = {"walk": C_LB, "run": C_RB, "fstand": C_LB, "fmove": C_RB, "idle": C_LB}
+
+def c_panel_bg(sec):
+    xb = C_SIDE[sec]; y0 = C_ROWS[sec][0][0]; y1 = C_ROWS[sec][-1][1]
+    sub = CA[y0:y1, xb[0]:xb[-1]].reshape(-1, 3); l = sub.max(axis=1)
+    return np.median(sub[(l > 18) & (l < 45)], axis=0)
+C_BG = {s: c_panel_bg(s) for s in C_ROWS}
+
+def c_cut(sec, r, c):
+    xb = C_SIDE[sec]; (y0, y1) = C_ROWS[sec][r]; x0, x1 = xb[c] + 3, xb[c + 1] - 3
+    rgb = CA[y0:y1, x0:x1].astype(float)
+    lum = rgb.max(axis=2); sat = rgb.max(axis=2) - rgb.min(axis=2)
+    bg = C_BG[sec]; bgl = bg.max(); d = np.abs(rgb - bg).max(axis=2)
+    lighter = (lum > bgl + 10) | (sat > 24)
+    lb, n = ndimage.label(ndimage.binary_dilation(lighter, iterations=2))
+    sizes = ndimage.sum(lighter, lb, range(1, n + 1)); main = np.argmax(sizes) + 1
+    ys, xs = np.nonzero(lb == main); top, bot = ys.min(), ys.max()
+    rows = np.arange(rgb.shape[0])[:, None]
+    # dark pixels (rifle, straps) count only in the upper body; lower down, darker than the background is the foot shadow
+    fg0 = lighter | ((rows < top + 0.6 * (bot - top)) & (lum < bgl - 7))
+    fg = ndimage.binary_closing(fg0, structure=np.ones((3, 3)), iterations=3)
+    fg = ndimage.binary_fill_holes(fg)
+    fg = fg & ~((rows > top + 0.82 * (bot - top)) & (lum < bgl + 3) & ~fg0)
+    gap = fg & ~fg0 & (rows > top + 0.45 * (bot - top)) & (d < 11)     # background sealed in between the legs
+    gl, gn = ndimage.label(gap)
+    if gn:
+        gs = ndimage.sum(gap, gl, range(1, gn + 1)); fg = fg & ~np.isin(gl, [i + 1 for i, v in enumerate(gs) if v >= 10])
+    bl, _ = ndimage.label(~fg); edge = set(np.unique(np.concatenate([bl[0], bl[-1], bl[:, 0], bl[:, -1]]))) - {0}
+    fg = ~np.isin(bl, list(edge))
+    fg = ndimage.binary_opening(fg, iterations=1)
+    lb2, n2 = ndimage.label(ndimage.binary_dilation(fg, iterations=3))
+    if n2 > 1:
+        s2 = ndimage.sum(fg, lb2, range(1, n2 + 1)); fg = fg & np.isin(lb2, [i + 1 for i, v in enumerate(s2) if v >= max(s2) * 0.06])
+    alpha = (fg * 255).astype(np.uint8); alpha[fg & ~ndimage.binary_erosion(fg)] = 170
+    return np.dstack([rgb.astype(np.uint8), alpha])
+
+def c_strip_flash(a):
+    """the same frame without its muzzle flash (bright/warm pixels round the flash out at the rifle's end)"""
+    rgb = a[..., :3].astype(int); R, G, B = rgb[..., 0], rgb[..., 1], rgb[..., 2]; lum = rgb.max(axis=2)
+    ys, xs = np.nonzero(a[..., 3] > 0); cx = np.median(xs); w = xs.max() - xs.min()
+    core = (((R > 200) & (G > 120) & (R - B > 60)) | ((R > 235) & (G > 220))) & (np.arange(a.shape[1])[None, :] > cx + 0.15 * w)
+    lb, n = ndimage.label(core)
+    if not n: return a
+    sizes = ndimage.sum(core, lb, range(1, n + 1))
+    zone = ndimage.binary_dilation(np.isin(lb, [i + 1 for i, v in enumerate(sizes) if v >= 4]), iterations=5)
+    out = a.copy(); out[..., 3] = np.where(zone & ((lum > 70) | (R - B > 22)), 0, a[..., 3])
+    m = out[..., 3] > 0; l2, n2 = ndimage.label(m)
+    if n2 > 1:
+        s2 = ndimage.sum(m, l2, range(1, n2 + 1)); out[..., 3] = np.where(np.isin(l2, [i + 1 for i, v in enumerate(s2) if v >= max(s2) * 0.03]), out[..., 3], 0)
+    return out
+
+STAND_C = 67   # standing figure height in this sheet (walk frames), px
+# clip -> (panel, [(row, col)...]) by the direction the frames really face (see the note above)
+C_CLIPS = {
+    "walk_S": ("walk", [(r, 0) for r in range(4)]), "walk_SE": ("walk", [(r, 2) for r in range(4)]),
+    "walk_NE": ("walk", [(r, 5) for r in (1, 2, 3)]), "walk_N": ("walk", [(r, 4) for r in range(4)]),
+    "run_SE": ("run", [(r, 1) for r in range(4)]), "run_NE": ("run", [(r, 5) for r in range(4)]), "run_N": ("run", [(r, 4) for r in range(4)]),
+    "fire_SE": ("fstand", [(r, 0) for r in range(4)]), "fire_NE": ("fstand", [(r, 7) for r in range(4)]),
+    "firemove_SE": ("fmove", [(r, 0) for r in range(4)]), "firemove_NE": ("fmove", [(r, 7) for r in range(4)]),
+    "idle_S": ("idle", [(r, 0) for r in range(2)]), "idle_SE": ("idle", [(r, 2) for r in range(2)]),
+    "idle_NE": ("idle", [(r, 5) for r in range(2)]), "idle_N": ("idle", [(r, 4) for r in range(2)]),
+}
+
+def c_frame(a, k):
+    im = Image.fromarray(a, "RGBA")
+    im = im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS)
+    al = np.asarray(im)[..., 3]; ys, xs = np.nonzero(al > 40)
+    im = im.crop((max(0, xs.min() - 1), max(0, ys.min() - 1), min(im.width, xs.max() + 2), min(im.height, ys.max() + 2)))
+    al = np.asarray(im)[..., 3]; ys, xs = np.nonzero(al > 40)
+    top, bot = ys.min(), ys.max(); h = bot - top
+    head = xs[ys <= top + 0.12 * h].mean(); hip = xs[(ys >= top + 0.5 * h) & (ys <= top + 0.62 * h)].mean()
+    return im, ((head + hip) / 2, float(bot + 1))
+
+def c_clip(name):
+    sec, cells = C_CLIPS[name]
+    raw = [c_cut(sec, r, c) for r, c in cells]
+    hs = []
+    for a in raw:
+        ys = np.nonzero(a[..., 3] > 0)[0]; hs.append(ys.max() - ys.min() + 1)
+    target = STAND_C if sec == "idle" else float(np.median(hs))
+    out = []
+    for a, h in zip(raw, hs):
+        k = float(np.clip(target / h, 0.85, 1.2))
+        out.append((a, k))
+    return out
+
+def mirror_item(item):
+    im, (ax, ay), mz, k = item
+    return (im.transpose(Image.FLIP_LEFT_RIGHT), (im.width - ax, ay), mz, k)
+
+print("infantry8")
+I8 = Atlas()
+done = {}
+for name in C_CLIPS:
+    items = []
+    for a, k in c_clip(name):
+        im, anc = c_frame(a, k); items.append((im, anc, (0, 0), 1.0))
+    done[name] = items
+    if name.startswith("fire"):
+        aim = []
+        for a, k in c_clip(name):
+            im, anc = c_frame(c_strip_flash(a), k); aim.append((im, anc, (0, 0), 1.0))
+        done[name.replace("firemove", "movaim").replace("fire", "aim")] = aim
+for name, items in list(done.items()):
+    I8.add(name, items)
+    d = name.split("_")[1]
+    if d in ("SE", "NE"):
+        I8.add(name.replace("_" + d, "_" + ("SW" if d == "SE" else "NW")), [mirror_item(it) for it in items])
+I8.save(os.path.join(OUT, "infantry8.png"), os.path.join(OUT, "infantry8.json"),
+        "user-supplied Military_Soldier_Sprite_Sheet_Collection_1.png, frames re-assigned by their real facing; tools/slice_sprites.py", STAND_C)

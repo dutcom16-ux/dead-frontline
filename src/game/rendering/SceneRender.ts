@@ -78,7 +78,7 @@ export class SceneRender {
       // ---- survivors
       for (const c of g.civs) {
         if (c.dead || c.state === "gone" || !vis(c.x, c.y)) continue;
-        if (!(c.military && this.sprites.ready)) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
+        if (!(c.military && (this.sprites.ready || this.sprites.inf))) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
         if (c.state === "hiding") this.put("m_beacon", c.x, c.y, c.z + 2.6 + Math.sin(T * 3 + c.id) * 0.15, T * 2, [0.3, 0.75, 1.0], 0.35);
       }
       for (const c of g.corpses) if (vis(c.x, c.y) && !this.sprites.coversCorpse(c)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);

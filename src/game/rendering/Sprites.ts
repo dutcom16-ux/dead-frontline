@@ -7,8 +7,13 @@
 // away from the camera uses the two back frames with a step bob, and NE/NW movement uses the side
 // cycle.
 //
-// Riflemen and soldiers who turned into infected have true 8-direction sheets (soldier8.*):
-// walk, aim, fire and death for riflemen; walk, grab and death for the infected soldier.
+// Infantry (every class) use the infantry8.* sheet: walk, run, idle, firing standing and firing on the
+// move, with frames sorted by the way they really face (tools/slice_sprites.py). To keep the motion
+// steady, the renderer turns a soldier one view at a time through the views in between, holds a
+// view until the heading is clearly past it, advances walk and run cycles by the distance actually
+// covered (no foot sliding), switches walk/run with a speed margin, plays the firing frames once per
+// shot and holds aim (no flash) between shots. Deaths use the 8-direction rifleman sheet and soldiers
+// who turn into infected the 8-direction infected-soldier sheet (soldier8.*).
 //
 // Sprites are drawn on the 2D overlay sorted by screen depth. A figure behind a building is drawn
 // faded so it stays visible. If the sheets fail to load the game keeps its 3D figures.
@@ -26,13 +31,18 @@ type Dir8 = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
 const SECT8: Dir8[] = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
 /** the 8-direction walk clips ramp from standing to a full stride: play them back and forth */
 const STRIDE = [1, 2, 3, 4, 3, 2];
+/** compass order, clockwise from facing away from the viewer */
+const COMPASS: Dir8[] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+const WALK_CYCLE_M = 1.6, RUN_CYCLE_M = 2.6;   // ground covered per animation cycle (two steps)
+interface Anim8 { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; side: number; phase: number; lx: number; ly: number; lt: number; spd: number; run: boolean; shotT: number; flash: number }
 
 const HUMAN_M = 1.8 * 1.3;   // figures are drawn a little larger than life so they read at RTS zoom
 const TINTS: Record<string, string> = { bloater: "rgba(150,175,40,0.42)", brute: "rgba(30,18,12,0.38)", screamer: "rgba(235,215,225,0.30)", mutant: "rgba(150,25,20,0.36)", turned: "rgba(105,135,55,0.48)" };
 const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 
 export class Sprites {
-  troops: Sheet | null = null; zombies: Sheet | null = null; s8: Sheet | null = null;
+  troops: Sheet | null = null; zombies: Sheet | null = null; s8: Sheet | null = null; inf: Sheet | null = null;
+  anim = new Map<number, Anim8>();
   ready = false; zready = false;
   flip = new Map<number, boolean>();
   occl = new Map<number, { t: number; v: boolean }>();
@@ -46,16 +56,16 @@ export class Sprites {
         return { img, atlas, tints: new Map() };
       } catch (e) { return null; }
     };
-    [this.troops, this.zombies, this.s8] = await Promise.all([get("troops"), get("zombies"), get("soldier8")]);
+    [this.troops, this.zombies, this.s8, this.inf] = await Promise.all([get("troops"), get("zombies"), get("soldier8"), get("infantry8")]);
     this.ready = !!this.troops; this.zready = !!this.zombies;
   }
   /** riflemen are drawn from the 8-direction sheet */
   private rifle8(u: Unit) { return !!this.s8 && u.type === "rifleman"; }
-  covers(u: Unit) { return !u.vehicle && (this.ready || this.rifle8(u)); }
+  covers(u: Unit) { return !u.vehicle && (this.ready || this.rifle8(u) || !!this.inf); }
   coversZombie(z: Zombie) { return z.soldier ? this.ready || !!this.s8 : this.zready && z.type !== "abomination"; }
   coversCorpse(c: Corpse) {
     if (c.model === "abomination") return false;
-    if (c.soldier || (c.kind === "soldier" && c.utype === "rifleman")) return this.ready || !!this.s8;
+    if (c.soldier || (c.kind === "soldier" && (c.utype === "rifleman" || !!this.inf))) return this.ready || !!this.s8;
     if (c.sprite || c.kind === "soldier") return this.ready;
     return this.zready && !!c.kind;
   }
@@ -81,6 +91,88 @@ export class Sprites {
     const sq = u.order.kind === "formation" ? squadOf(g, u) : null;
     const ready = u.reloadT <= 0 && (u.order.kind === "hold" || u.order.kind === "defend" || (!!sq && sq.halted && KNEEL.has(sq.formation)));
     return { anim: (ready ? "r_aim_" : "r_walk_") + d, i: 0 };
+  }
+  /** displayed compass direction with hysteresis; turns step through the views in between */
+  private turnTo(st: Anim8, cam: IsoCamera, heading: number, now: number, settle = 0.12) {
+    const [sx, sy] = this.facing(cam, heading);
+    if (sx > 0.15) st.side = 1; else if (sx < -0.15) st.side = -1;
+    const deg = (90 - (Math.atan2(sy, sx) * 180) / Math.PI + 360) % 360;   // 0 = N (away), clockwise
+    const off = (((deg - st.dir * 45 + 540) % 360) - 180);
+    if (Math.abs(off) <= 30.5) { st.wantT = -1; return; }    // still well inside the current view
+    if (st.wantT < 0) st.wantT = now;
+    if (now - st.wantT < settle) return;                     // the new view must be wanted for a moment (no flicker)
+    if (now - st.dirT < 0.06) return;                        // then one view at a time
+    const next = (st.dir + (off > 0 ? 1 : -1) + 8) % 8;
+    if (next === st.prevDir && now - st.dirT < 0.3) return;  // never undo a turn straight away
+    st.prevDir = st.dir; st.dir = next; st.dirT = now;
+  }
+  private state(u: { id: number; x: number; y: number }, cam: IsoCamera, heading: number, now: number): Anim8 {
+    let st = this.anim.get(u.id);
+    if (!st) {
+      const [sx, sy] = this.facing(cam, heading);
+      const deg = (90 - (Math.atan2(sy, sx) * 180) / Math.PI + 360) % 360;
+      st = { dir: Math.round(deg / 45) % 8, prevDir: -1, dirT: -1, wantT: -1, aimA: 0, aimT: -9, side: sx >= 0 ? 1 : -1, phase: (u.id % 5) * 0.2, lx: u.x, ly: u.y, lt: now, spd: 0, run: false, shotT: -9, flash: 0 };
+      this.anim.set(u.id, st);
+    }
+    return st;
+  }
+  /** clip name for an action in a compass direction (the sheet has no side or straight front/back firing views) */
+  private clip(action: string, d: Dir8, side: number): string {
+    if (d === "E") d = "SE"; else if (d === "W") d = "SW";
+    if (action === "fire" || action === "aim" || action === "firemove" || action === "movaim") {
+      if (d === "S") d = side > 0 ? "SE" : "SW";
+      else if (d === "N") d = side > 0 ? "NE" : "NW";
+    }
+    if (action === "run" && d === "S") return "walk_S";
+    return action + "_" + d;
+  }
+  /** infantry pose on the infantry8 sheet; also returns a breathing offset in px */
+  poseInf(g: Game, u: Unit, cam: IsoCamera, now: number, human: number): { anim: string; i: number; bob: number } {
+    const tgt = g.get(u.target);
+    const engaging = !!tgt && !tgt.dead && u.losOk && (u.mag > 0 || u.reserve > 0);
+    let face = engaging ? Math.atan2(tgt.y - u.y, tgt.x - u.x) : u.heading;
+    const st = this.state(u, cam, face, now);
+    // after a target falls, keep aiming that way for a moment instead of snapping back
+    if (engaging) { st.aimA = face; st.aimT = now; }
+    else if (now - st.aimT < 0.8 && !u.moving) face = st.aimA;
+    // ground speed from the figure's real movement (smoothed); the cycle advances with distance
+    const dt = now - st.lt;
+    if (dt > 0 && dt < 0.5) {
+      const d = Math.hypot(u.x - st.lx, u.y - st.ly);
+      // walk or run from the intended speed (smoothed), with a wide margin so it does not flip
+      const k = Math.min(1, dt * 4);
+      st.spd = st.spd * (1 - k) + (u.moving ? u.speedNow : 0) * k;
+      st.run = st.run ? st.spd > 1.7 : st.spd > 2.4;
+      st.phase += Math.min(d, 1.5) / (st.run ? RUN_CYCLE_M : WALK_CYCLE_M);
+    }
+    st.lx = u.x; st.ly = u.y; st.lt = now;
+    // a shot: rising edge of the muzzle flash timer
+    if (u.flashT > st.flash + 1e-4) st.shotT = now;
+    st.flash = u.flashT;
+    const moving = u.moving && st.spd > 0.3;
+    this.turnTo(st, cam, face, now, moving || engaging ? 0.12 : 0.25);   // standing soldiers turn less eagerly
+    const d = COMPASS[st.dir];
+    const cyc = (name: string) => { const n = this.inf!.atlas.anims[name]?.length || 1; return Math.floor(st.phase * n) % n; };
+    const sinceShot = now - st.shotT;
+    if (moving) {
+      if (engaging) {
+        const name = this.clip(sinceShot < 0.15 ? "firemove" : "movaim", d, st.side);
+        return { anim: name, i: cyc(name), bob: 0 };
+      }
+      const name = this.clip(st.run ? "run" : "walk", d, st.side);
+      return { anim: name, i: cyc(name), bob: 0 };
+    }
+    if (engaging) {
+      // the four firing frames once per shot (big flash -> small), then hold aim without a flash
+      if (sinceShot < 0.2) return { anim: this.clip("fire", d, st.side), i: Math.min(3, Math.floor(sinceShot / 0.05)), bob: 0 };
+      return { anim: this.clip("aim", d, st.side), i: 3, bob: 0 };
+    }
+    const sq = u.order.kind === "formation" ? squadOf(g, u) : null;
+    const ready = u.reloadT <= 0 && (u.order.kind === "hold" || u.order.kind === "defend" || (!!sq && sq.halted && KNEEL.has(sq.formation)));
+    if (ready) return { anim: this.clip("aim", d, st.side), i: 3, bob: 0 };
+    // idle: slow breathing (two frames and a slight rise and fall)
+    const ph = (u.id % 7) * 0.9;
+    return { anim: this.clip("idle", d, st.side), i: Math.floor((now + ph) / 1.4) % 2, bob: Math.sin((now + ph) * 2.1) * human * 0.006 };
   }
   /** a soldier who turned: 8-direction infected soldier */
   zpose8(g: Game, z: Zombie, cam: IsoCamera, now: number): { anim: string; i: number } {
@@ -215,7 +307,7 @@ export class Sprites {
 
   /** draw corpses, soldiers, infected and combat effects on the overlay (before health bars and labels) */
   draw(ctx: CanvasRenderingContext2D, g: Game, bf: Battlefield, cam: IsoCamera, W: number, H: number, now: number) {
-    if (!this.ready && !this.zready && !this.s8) return;
+    if (!this.ready && !this.zready && !this.s8 && !this.inf) return;
     const ppm = H / (2 * cam.zoom);
     const human = Math.max(20, ppm * HUMAN_M);
     const on = (s: [number, number] | null, pad = 80) => !!s && s[0] > -pad && s[1] > -pad && s[0] < W + pad && s[1] < H + pad;
@@ -228,7 +320,7 @@ export class Sprites {
       if (!this.coversCorpse(c)) continue;
       const s = bf.screen(c.x, c.y, c.z);
       if (!on(s)) continue;
-      if (S8 && (c.soldier || (c.kind === "soldier" && c.utype === "rifleman"))) {
+      if (S8 && (c.soldier || (c.kind === "soldier" && (c.utype === "rifleman" || !!this.inf)))) {
         const f = this.frame(S8, (c.soldier ? "z_die_" : "r_die_") + this.dir8(cam, c.rot), Math.min(2, (g.time - c.t) * 6));
         if (f) bodies.push({ y: s![1], d: () => this.blit(ctx, S8.img, S8, f, s![0], s![1], human, false) });
       } else if (c.sprite || c.kind === "soldier" || c.soldier) {
@@ -250,6 +342,20 @@ export class Sprites {
       if (!u.alive || u.vehicle || u.inVehicle !== null) continue;
       const s = bf.screen(u.x, u.y, u.z);
       if (!on(s)) continue;
+      const INF = this.inf;
+      if (INF) {
+        const p = this.poseInf(g, u, cam, now, human);
+        const f = this.frame(INF, p.anim, p.i);
+        if (!f) continue;
+        const occ = this.occluded(bf, cam, u.id, u.x, u.y, u.z, now);
+        list.push({ y: s![1], d: () => {
+          ctx.globalAlpha = occ ? 0.45 : 1;
+          if (u.hitT > 0) ctx.filter = "brightness(1.8)";
+          this.blit(ctx, INF.img, INF, f, s![0], s![1] - p.bob, human, false);
+          ctx.filter = "none";
+        } });
+        continue;
+      }
       if (S8 && this.rifle8(u)) {
         const p = this.pose8(g, u, cam, now);
         const f = this.frame(S8, p.anim, p.i);
@@ -277,10 +383,16 @@ export class Sprites {
         if (p.muzzle) this.muzzle(ctx, T, f, s![0], sy, human, p.flip, now);
       } });
     }
-    if (T) for (const c of g.civs as Civilian[]) {
+    for (const c of g.civs as Civilian[]) {
       if (!c.military || c.dead || c.state === "gone") continue;
       const s = bf.screen(c.x, c.y, c.z);
       if (!on(s)) continue;
+      if (this.inf) {
+        const INF = this.inf, f = this.frame(INF, "idle_S", Math.floor(now / 1.4 + c.id) % 2);
+        if (f) list.push({ y: s![1], d: () => { ctx.globalAlpha = 0.85; this.blit(ctx, INF.img, INF, f, s![0], s![1], human, false); } });
+        continue;
+      }
+      if (!T) continue;
       const f = this.frame(T, c.state === "hiding" ? "crouch_S" : "idle_S", now * 3 + c.id);
       if (f) list.push({ y: s![1], d: () => { ctx.globalAlpha = 0.85; this.blit(ctx, T.img, T, f, s![0], s![1], human, false); } });
     }

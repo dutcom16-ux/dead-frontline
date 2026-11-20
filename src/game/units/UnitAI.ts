@@ -383,7 +383,7 @@ function formationMove(g: Game, u: Unit, dt: number, engaging: boolean): boolean
     }
   }
   // turn to walk only when really going somewhere: no about-turns for small corrections
-  if (d > 0.9 && !engaging) u.heading = turn(u.heading, dir, dt * TURN);
+  if (d > 1.5 && !engaging) u.heading = turn(u.heading, dir, dt * TURN);
   u.x = nx; u.y = ny;
   u.z = g.bf.h(u.x, u.y) + g.pileH(u.x, u.y);
   openDoors(g, u.x, u.y, Math.cos(dir), Math.sin(dir));

@@ -36,6 +36,46 @@ is generated in code. When you have more art, this is where it plugs in.
     art tinted green.
 * **Fallback:** if a sheet fails to load, the game draws the 3D figures for what it covered.
 
+## Infantry sheet (`public/sprites/infantry8.*`)
+
+* **Source:** `assets/source/infantry_8dir_collection.png` (Military_Soldier_Sprite_Sheet_Collection_1.png).
+  It has five labelled panels (walk, run, firing standing, firing moving, idle) on a dark textured
+  background. Record its licence here.
+* **The labels don't match the drawings.**
+  * Run and firing frames almost all face right.
+  * Several walk columns turn from facing the camera to facing away half way down.
+
+  The slicer assigns frames by their real facing:
+
+  | Clip | Panel, column (row numbers from 0) |
+  |---|---|
+  | `walk_S` | walk "0° Front" |
+  | `walk_SE` | walk "90° Right" |
+  | `walk_NE` | walk "225° Back-Left", rows 1–3 |
+  | `walk_N` | walk "180° Back" |
+  | `run_SE` | run "45° Front-Right" |
+  | `run_NE` | run "225° Back-Left" |
+  | `run_N` | run "180° Back" |
+  | `fire_SE` / `firemove_SE` | firing "0° Front" |
+  | `fire_NE` / `firemove_NE` | firing "315° Front-Left" |
+  | `idle_S` / `idle_SE` / `idle_NE` / `idle_N` | idle "Front" / "Right" / "Back-Left" / "Back" |
+
+  `_SW` and `_NW` clips are the `_SE` and `_NE` ones mirrored.
+* **Clean-up:**
+  * Background removal keeps the near-black rifle in the upper body and drops the foot shadows.
+  * Each clip is scaled to one height: the sheet's bottom rows are drawn about 8 % taller, its idle
+    figures about 14 % smaller.
+  * Every frame is anchored between head and hips, so a step doesn't shift the figure.
+  * `aim_*` / `movaim_*` are the firing frames with the muzzle flash removed, for aiming between shots.
+* **In the game** (`src/game/rendering/Sprites.ts`):
+  * A soldier turns one view at a time through the views in between, holds a view until the heading
+    is clearly past it, and never undoes a turn within 0.3 s.
+  * Walk and run cycles advance with the distance covered: one cycle per 1.6 m walking, 2.6 m running.
+  * Walk and run switch with a speed margin.
+  * Each shot plays the four firing frames, then the soldier holds aim without a flash.
+  * Idle alternates its two frames slowly, with a slight breathing rise and fall.
+  * `test/anim.mjs` measures all of this.
+
 ## 8-direction sheets (`public/sprites/soldier8.*`)
 
 * **Sources:**
@@ -55,8 +95,9 @@ is generated in code. When you have more art, this is where it plugs in.
   * Output is one 256-colour atlas, about 0.5 MB.
 * **Clips:** `r_walk_<dir>`, `r_aim_<dir>`, `r_fire_<dir>`, `r_die_<dir>`, `z_walk_<dir>`,
   `z_attack_<dir>`, `z_die_<dir>`, where `<dir>` is one of the eight directions. No mirroring is used.
-* **Use:** riflemen (moving, standing, aiming, firing, dead) and every soldier who turns or rises
-  infected, whatever his class.
+* **Use:** deaths of every infantry soldier (`r_die_*`), and every soldier who turns or rises infected
+  (`z_*`), whatever his class. The rifleman walk/aim/fire clips are the fallback if `infantry8` is
+  missing.
 
 To swap in different sheets, keep the clip names, edit the cell picks in the slicer, run it, and rebuild.
 
