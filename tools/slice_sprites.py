@@ -1,8 +1,10 @@
 # usage: python3 tools/slice_sprites.py
-# Cuts the two supplied sprite sheets into transparent atlases + JSON for the game:
-#   assets/source/squad_zombie_sheet.png (8086.png) -> soldier movement/aim/die frames + all infected frames
-#   assets/source/troops_sheet.png       (8085.png) -> reload and crouch frames (recoloured to match) + effects
-# Outputs public/sprites/troops.png/.json and public/sprites/zombies.png/.json.
+# Cuts the supplied sprite sheets into transparent atlases + JSON for the game:
+#   assets/source/squad_zombie_sheet.png  (8086.png) -> soldier movement/aim/die frames + all infected frames
+#   assets/source/troops_sheet.png        (8085.png) -> reload and crouch frames (recoloured to match) + effects
+#   assets/source/rifleman_8dir.png       (8088.png) -> riflemen: walk, aim, fire, die in 8 directions
+#   assets/source/zombie_soldier_8dir.png (8089.png) -> turned soldiers: walk, attack, die in 8 directions
+# Outputs public/sprites/troops.*, zombies.* and soldier8.* (png + json).
 #
 # The sheets' direction labels do not match the drawings, so clips are picked by what the art shows.
 # Directions in clip names are screen directions: S = facing the viewer, E = facing screen-right,
@@ -164,3 +166,72 @@ Z.add("run_E", B_(0, "R")); Z.add("run_E2", B_(1, "R")); Z.add("run_E3", B_(2, "
 Z.add("crawl_E", B_(4, "R")); Z.add("dead", B_(4, "M", [7]) + B_(4, "R", [3, 5]))
 Z.save(os.path.join(OUT, "zombies.png"), os.path.join(OUT, "zombies.json"),
        "user-supplied sprite sheet 8086.png (infected rows); tools/slice_sprites.py", 92)
+
+
+# ---------------------------------------------------------------- 8-direction sheets (8088, 8089)
+# 8 rows x 10 columns on a transparent background. Rows, clockwise from facing away from the viewer:
+# N, NE, E, SE, S, SW, W, NW. Columns: 0-4 walk cycle, 5-6 aim + fire (rifleman) or reach + grab
+# (infected soldier), 7-9 falling and lying dead. The rows are not drawn at one size, so each row is
+# scaled to the same standing height.
+DIRS8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
+COLS8 = [88, 236, 383, 528, 673, 803, 940, 1053, 1182, 1320]   # column centres (both sheets)
+STAND8 = 100   # standing figure height in the atlas (px)
+
+def sheet8(path, rows_y):
+    img = np.asarray(Image.open(path).convert("RGBA"))
+    bounds = [0] + [(rows_y[i] + rows_y[i + 1]) // 2 for i in range(len(rows_y) - 1)] + [img.shape[0]]
+    out = {}
+    for r in range(8):
+        y0, y1 = bounds[r], bounds[r + 1]
+        band = img[y0:y1]
+        lb, _ = ndimage.label(ndimage.binary_dilation(band[..., 3] > 40, iterations=3))
+        cells = {}
+        for k, sl in enumerate(ndimage.find_objects(lb)):
+            ys, xs = sl
+            area = int(((lb[sl] == k + 1) & (band[sl][..., 3] > 40)).sum())
+            if area < 60: continue
+            c = min(range(10), key=lambda i: abs(COLS8[i] - (xs.start + xs.stop) / 2))
+            b = cells.get(c)
+            cells[c] = (min(b[0], xs.start), min(b[1], ys.start), max(b[2], xs.stop), max(b[3], ys.stop)) if b else (xs.start, ys.start, xs.stop, ys.stop)
+        frames = []
+        for c in range(10):
+            x0, ya, x1, yb = cells[c]
+            crop = band[ya:yb, x0:x1].copy()
+            # keep only this cell's figure (drop stray bits of neighbouring frames)
+            lb2, n2 = ndimage.label(ndimage.binary_dilation(crop[..., 3] > 40, iterations=4))
+            if n2 > 1:
+                sizes = ndimage.sum(crop[..., 3] > 40, lb2, range(1, n2 + 1))
+                keep = np.isin(lb2, [i + 1 for i, v in enumerate(sizes) if v >= max(sizes) * 0.08])
+                crop[..., 3] = np.where(keep, crop[..., 3], 0)
+            frames.append(crop)
+        # one scale per row: median standing height of the walk/aim frames -> STAND8
+        hs = []
+        for f in frames[:7]:
+            ys = np.nonzero(f[..., 3] > 40)[0]
+            hs.append(ys.max() - ys.min() + 1)
+        k = STAND8 / float(np.median(hs))
+        items = []
+        for f in frames:
+            im = Image.fromarray(f, "RGBA")
+            im = im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS)
+            a = np.asarray(im)[..., 3]
+            ys, xs = np.nonzero(a > 40)
+            im = im.crop((max(0, xs.min() - 1), max(0, ys.min() - 1), min(im.width, xs.max() + 2), min(im.height, ys.max() + 2)))
+            a = np.asarray(im)[..., 3]
+            ys, xs = np.nonzero(a > 40)
+            cut = ys.max() - max(2, int((ys.max() - ys.min()) * 0.12))
+            ax = float(xs[ys >= cut].mean())
+            items.append((im, (ax, float(ys.max() + 1)), (0, 0), 1.0))
+        out[DIRS8[r]] = items
+    return out
+
+print("soldier8")
+R = sheet8(os.path.join(ROOT, "assets/source/rifleman_8dir.png"), [76, 228, 374, 521, 661, 795, 922, 1050])
+ZS = sheet8(os.path.join(ROOT, "assets/source/zombie_soldier_8dir.png"), [78, 233, 380, 526, 668, 802, 930, 1056])
+S8 = Atlas()
+for d in DIRS8:
+    S8.add("r_walk_" + d, R[d][0:5]); S8.add("r_aim_" + d, R[d][5:6]); S8.add("r_fire_" + d, R[d][6:7]); S8.add("r_die_" + d, R[d][7:10])
+for d in DIRS8:
+    S8.add("z_walk_" + d, ZS[d][0:5]); S8.add("z_attack_" + d, ZS[d][5:7]); S8.add("z_die_" + d, ZS[d][7:10])
+S8.save(os.path.join(OUT, "soldier8.png"), os.path.join(OUT, "soldier8.json"),
+        "user-supplied 8-direction sheets 8088.png (rifleman) and 8089.png (infected soldier); tools/slice_sprites.py", STAND8)

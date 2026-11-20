@@ -36,6 +36,28 @@ is generated in code. When you have more art, this is where it plugs in.
     art tinted green.
 * **Fallback:** if a sheet fails to load, the game draws the 3D figures for what it covered.
 
+## 8-direction sheets (`public/sprites/soldier8.*`)
+
+* **Sources:**
+  * `assets/source/rifleman_8dir.png` (8088.png): riflemen.
+  * `assets/source/zombie_soldier_8dir.png` (8089.png): soldiers who turned into infected.
+
+  Both have transparent backgrounds. Record their licence here too.
+* **Layout:** 8 rows × 10 columns.
+  * Rows, clockwise from facing away from the viewer: N, NE, E, SE, S, SW, W, NW.
+  * Columns 1–5: walk cycle, from standing to a full stride (played back and forth: 2-3-4-5-4-3).
+  * Columns 6–7: aim and fire for the rifleman (the muzzle flash is drawn in); reach and grab for the
+    infected soldier.
+  * Columns 8–10: falling and lying dead.
+* **Slicing:** the same script cuts each row by grid cell (some frames touch).
+  * Each row is scaled so the standing figure is 100 px tall, because the sheet's rows are not drawn at
+    one size.
+  * Output is one 256-colour atlas, about 0.5 MB.
+* **Clips:** `r_walk_<dir>`, `r_aim_<dir>`, `r_fire_<dir>`, `r_die_<dir>`, `z_walk_<dir>`,
+  `z_attack_<dir>`, `z_die_<dir>`, where `<dir>` is one of the eight directions. No mirroring is used.
+* **Use:** riflemen (moving, standing, aiming, firing, dead) and every soldier who turns or rises
+  infected, whatever his class.
+
 To swap in different sheets, keep the clip names, edit the cell picks in the slicer, run it, and rebuild.
 
 ## Units, infected, vehicles, defences (`src/game/rendering/Models.ts`)

@@ -143,15 +143,20 @@ run by the automated test.
   logistics with stock 0 and is locked behind a campaign flag.
 * **Strategic map coastlines.** Operation markers sit at real coordinates, but island outlines are not
   drawn. Natural Earth data could be added.
-* **Art.** Soldiers and infected use your two sprite sheets (see `docs/ASSETS.md`). The Abomination,
+* **Art.** Soldiers and infected use your sprite sheets (see `docs/ASSETS.md`). Riflemen and soldiers
+  who turn into infected have full 8-direction sheets (walk, aim, fire, death / walk, grab, death).
+  The other infantry classes still use the earlier sheets. The Abomination,
   living civilians, vehicles and defences are still code-generated low-poly models. Buildings use the
   procedural Philippine archetypes from the Toledo map engine.
-* **Sprite directions are approximate.** The sheets' direction labels don't match the drawings. The art
-  has front, three-quarter front, side and back views, so the game draws eight directions from those
-  (west = east mirrored). There is no walk cycle from behind: a soldier walking away from the camera
-  uses the two back frames with a step bob, and a diagonal away from the camera uses the side cycle.
-  Infected have no back walk either. Every infantry class uses the same soldier art; bloater, brute,
-  screamer and mutant are the walker art tinted and scaled.
+* **Sprite directions are approximate for everyone except riflemen and turned soldiers.** The earlier
+  sheets' direction labels don't match the drawings. That art has front, three-quarter front, side and
+  back views, so the game draws eight directions from those (west = east mirrored). There is no walk
+  cycle from behind: a soldier walking away from the camera uses the two back frames with a step bob,
+  and a diagonal away from the camera uses the side cycle.
+* **Riflemen have no reload or kneel frames** in their 8-direction sheet: they reload standing at ease
+  and stand with the rifle up where other classes kneel.
+  Infected have no back walk either. All classes other than the rifleman share one soldier look;
+  bloater, brute, screamer and mutant are the walker art tinted and scaled.
 * **Infection has no cure.** Medics heal wounds, not bites. Once infected, a soldier will turn.
 * **Corpse piles don't block shots.** Piles slow movement and let the infected climb defences, but
   bullets and line of sight pass over them. The infected cannot climb walls, gates, bunkers or towers.
