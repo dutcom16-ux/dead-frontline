@@ -14,6 +14,7 @@ export function fire(g: Game, u: Unit, t: any, moving: boolean) {
   u.mag--;
   g.stats.shots++;
   u.flashT = 0.06;
+  u.shotN++;
   const muzzle = gunTip(u);
   g.noise(u.x, u.y, w.noise);
   g.onSound(w.sound, u.x, u.y);

@@ -24,6 +24,8 @@ export class Unit {
   medkits = 0; healT = 0; buildT = 0; clearT = 0;
   passengers: number[] = []; inVehicle: number | null = null;
   burn = 0; flashT = 0; aimX = 0; aimY = 0; hitT = 0;
+  /** shots fired (the sprite renderer starts the firing frames and the muzzle flash on each new shot) */
+  shotN = 0;
   defendAt: [number, number] | null = null;
   rank = 0;
   // squad and formation (see units/Squads.ts)
@@ -133,7 +135,7 @@ export class Crate {
 
 export interface Projectile { x: number; y: number; z: number; tx: number; ty: number; tz: number; speed: number; radius: number; damage: number; owner: number; kind: string; t: number }
 export interface Effect { kind: string; x: number; y: number; z: number; t: number; life: number; s: number; rot?: number; col?: [number, number, number]; x2?: number; y2?: number; z2?: number }
-export interface Corpse { x: number; y: number; z: number; rot: number; col: [number, number, number]; s: number; t: number; model: string; sprite?: boolean; flip?: boolean; pk?: number; w?: number; kind?: string; id?: number; soldier?: string; utype?: string }
+export interface Corpse { x: number; y: number; z: number; rot: number; col: [number, number, number]; s: number; t: number; model: string; sprite?: boolean; flip?: boolean; pk?: number; w?: number; kind?: string; id?: number; soldier?: string; utype?: string; uid?: number }
 export interface Fire { x: number; y: number; r: number; t: number; dps: number }
 export interface Noise { x: number; y: number; r: number; t: number }
 /** transport visuals (helicopters, convoy trucks): fly or drive in, deliver, leave */

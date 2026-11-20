@@ -46,7 +46,7 @@ export class SceneRender {
         if (!u.alive || u.inVehicle !== null || !vis(u.x, u.y)) continue;
         const flash = u.hitT > 0 ? 1.8 : 1;
         const col = u.def.color.map((c) => c * flash);
-        const spr = this.sprites.covers(u); // infantry come from the troop sprite sheet (overlay)
+        const spr = this.sprites.covers(u); // infantry come from the military sprite sheet (overlay), muzzle flash included
         if (!spr) this.put("m_" + (UNIT_MODEL[u.type] || "soldier"), u.x, u.y, u.z, rotFor(u.heading), col, 1);
         if (u.selected) this.put("m_ring", u.x, u.y, u.z, 0, C.sel, u.vehicle ? u.r * 1.4 : 1);
         else if (ui.hover === u.id) this.put("m_ring", u.x, u.y, u.z, 0, C.hover, u.vehicle ? u.r * 1.4 : 1);
@@ -78,7 +78,7 @@ export class SceneRender {
       // ---- survivors
       for (const c of g.civs) {
         if (c.dead || c.state === "gone" || !vis(c.x, c.y)) continue;
-        if (!(c.military && (this.sprites.ready || this.sprites.inf))) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
+        if (!(c.military && this.sprites.ready)) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
         if (c.state === "hiding") this.put("m_beacon", c.x, c.y, c.z + 2.6 + Math.sin(T * 3 + c.id) * 0.15, T * 2, [0.3, 0.75, 1.0], 0.35);
       }
       for (const c of g.corpses) if (vis(c.x, c.y) && !this.sprites.coversCorpse(c)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);
@@ -131,7 +131,7 @@ export class SceneRender {
       }
       // ---- effects
       const tracers: number[] = [];
-      const fxSprites = this.sprites.ready;
+      const fxSprites = this.sprites.coversEffects();
       for (const e of g.effects) {
         if (!vis(e.x, e.y, 20)) continue;
         if (fxSprites && (e.kind === "blast" || e.kind === "smoke" || e.kind === "hit" || e.kind === "spark")) continue; // sprite sheet effects

@@ -178,7 +178,7 @@ export class Game {
       u.passengers = [];
       this.addObstacle("wreck", u.x, u.y, u.heading);
     } else {
-      const c = this.corpse(u.x, u.y, u.z, u.heading, u.def.color, 1, "corpse", { sprite: true, kind: "soldier", utype: u.type, flip: Math.cos(u.heading) < 0 });
+      const c = this.corpse(u.x, u.y, u.z, u.heading, u.def.color, 1, "corpse", { sprite: true, kind: "soldier", utype: u.type, uid: u.id, flip: Math.cos(u.heading) < 0 });
       // killed while infected: he rises again
       if (u.infectedAt >= 0) {
         this.risers.push({ x: u.x, y: u.y, t: this.time + 4, type: u.type, name: u.name, squad: u.squad, corpse: c });

@@ -317,7 +317,7 @@ for (const f of ["wedge", "line", "column", "box", "circle", "defensive"]) {
     __T.look(q.cx, q.cy, 10);
     for (const u of G.units) u.selected = false;
     const sp = __df.render.sprites, cam = __df.session.cam;
-    const poses = __T.members(q).map((u) => sp.pose(G, u, cam, 1).anim);
+    const poses = __T.members(q).map((u) => sp.soldierPose(G, u, cam, __df.render.time, 60).anim);
     return { pass: Math.max(...err) < 1.2, detail: "all 9 soldiers within " + Math.max(...err).toFixed(2) + " m of their slots; facing " + q.facing.toFixed(2) + ", poses " + poses.join(" ") };
   })()`, `form_${f}.png`);
 }
