@@ -64,7 +64,7 @@ export class SceneRender {
         const k = z.hitT > 0 ? 1.7 : 1, b = z.burnT > 0;
         const col = b ? [0.9, 0.45, 0.15] : z.def.color.map((c) => c * k);
         const bob = z.state === "chase" ? Math.sin(T * 9 + z.id) * 0.06 : 0;
-        this.put("m_" + (UNIT_MODEL[z.type] || "zombie"), z.x, z.y, z.z + bob, rotFor(z.heading), col, z.def.size);
+        if (!this.sprites.coversZombie(z)) this.put("m_" + (UNIT_MODEL[z.type] || "zombie"), z.x, z.y, z.z + bob, rotFor(z.heading), col, z.def.size);
         if (b) this.put("m_fire", z.x, z.y, z.z, T * 4 + z.id, [1.4, 0.6, 0.15], 0.5 * z.def.size);
         if (ui.hover === z.id || focusIds.has(z.id)) this.put("m_ring", z.x, z.y, z.z, 0, C.focus, z.def.size * 1.1);
       }
@@ -81,7 +81,7 @@ export class SceneRender {
         if (!(c.military && this.sprites.ready)) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
         if (c.state === "hiding") this.put("m_beacon", c.x, c.y, c.z + 2.6 + Math.sin(T * 3 + c.id) * 0.15, T * 2, [0.3, 0.75, 1.0], 0.35);
       }
-      for (const c of g.corpses) if (vis(c.x, c.y) && !(c.sprite && this.sprites.ready)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);
+      for (const c of g.corpses) if (vis(c.x, c.y) && !this.sprites.coversCorpse(c)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);
       // ---- objects
       for (const c of g.crates) if (!c.dead && vis(c.x, c.y)) this.put("m_crate", c.x, c.y, c.z, c.id, c.medical ? C.med : c.deploy || c.engineering ? C.kit : C.ammo, 1);
       for (const o of g.obstacles) {
@@ -198,7 +198,9 @@ export class SceneRender {
     ctx.clearRect(0, 0, W, H);
     if (!g) return;
     const bf = this.bf;
+    this.sprites.overlay(ctx, g, bf, W, H, this.time, "ground");
     this.sprites.draw(ctx, g, bf, cam, W, H, this.time);
+    this.sprites.overlay(ctx, g, bf, W, H, this.time, "labels");
     const px = 1 / (cam.zoom / 60);
     const bar = (x: number, y: number, w: number, f: number, col: string, h = 4) => {
       ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(x - w / 2 - 1, y - 1, w + 2, h + 2);

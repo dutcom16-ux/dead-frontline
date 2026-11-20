@@ -5,10 +5,11 @@ import type { Session } from "../Session";
 import type { Ghost } from "../rendering/SceneRender";
 import { Unit, Zombie, Nest, Crate, Civilian, Obstacle, Formation } from "../entities";
 import { issue, unload } from "../units/UnitAI";
+import { Squad, squadOf, liveMembers, regroup, setFormation, faceTo, setLeader, createSquad, FORMATIONS, FORMATION_LABEL, FormationKind, isFormation } from "../units/Squads";
 import { dist } from "../core";
 import { STRUCTURES, SUPPLIES } from "../data";
 
-export type Mode = { kind: "attackMove" | "patrol" | "follow" | "build" | "supply" | "fob" | "retreatTo"; item?: string; rot: number } | null;
+export type Mode = { kind: "attackMove" | "patrol" | "follow" | "build" | "supply" | "fob" | "retreatTo" | "face" | "defendAt"; item?: string; rot: number } | null;
 
 export class Controls {
   s: Session; canvas: HTMLElement;
@@ -19,7 +20,8 @@ export class Controls {
   hover: number | null = null;
   mode: Mode = null;
   ghost: Ghost | null = null;
-  formation: Formation = "spread";
+  formation: Formation = "spread";   // for soldiers ordered on their own; squads keep their own formation
+  formMenu = false;
   groups = new Map<number, number[]>();
   lastClick = { t: 0, id: 0 }; lastGroupKey = { k: 0, t: 0 };
   touches = new Map<number, { x: number; y: number }>();
@@ -48,6 +50,13 @@ export class Controls {
   get g() { return this.s.game!; }
   get cam() { return this.s.cam; }
   selected(): Unit[] { return this.s.game ? this.g.units.filter((u) => u.selected && u.alive && u.inVehicle === null) : []; }
+  /** squads with at least one selected soldier */
+  selSquads(): Squad[] { const out: Squad[] = []; for (const u of this.selected()) { const q = u.vehicle ? null : squadOf(this.g, u); if (q && !out.includes(q)) out.push(q); } return out; }
+  selectSquad(q: Squad, add = false) {
+    if (!add) for (const u of this.g.units) u.selected = false;
+    for (const u of liveMembers(this.g, q)) if (u.inVehicle === null) u.selected = true;
+    this.onChange();
+  }
   setMode(m: Mode) { this.mode = m; this.ghost = null; this.onChange(); }
 
   // ---------------------------------------------------------------- frame update (camera keys, edge scroll, ghost)
@@ -175,7 +184,11 @@ export class Controls {
     const p = this.pick(x, y);
     const now = performance.now();
     if (p instanceof Unit) {
-      if (ctrl || (now - this.lastClick.t < 350 && this.lastClick.id === p.id)) {
+      const sq = p.vehicle ? null : squadOf(g, p);
+      if (now - this.lastClick.t < 350 && this.lastClick.id === p.id && sq) {
+        // double-click: the whole squad
+        this.selectSquad(sq, shift);
+      } else if (ctrl || (now - this.lastClick.t < 350 && this.lastClick.id === p.id)) {
         // all units of this type on screen
         for (const u of g.units) u.selected = u.alive && u.inVehicle === null && u.type === p.type && this.onScreen(u);
       } else if (shift) p.selected = !p.selected;
@@ -231,7 +244,19 @@ export class Controls {
     switch (m.kind) {
       case "attackMove": issue(g, sel, { kind: "attackMove", x: gp[0], y: gp[1] }, { queue: shift, formation: this.formation }); g.effect("order", gp[0], gp[1], this.s.bf.h(gp[0], gp[1]), 0.45, 1, { col: [1, 0.6, 0.2] }); break;
       case "patrol": issue(g, sel, { kind: "patrol", x: gp[0], y: gp[1] }, { formation: this.formation }); break;
-      case "retreatTo": issue(g, sel, { kind: "retreat", x: gp[0], y: gp[1] }, { formation: "column" }); break;
+      case "retreatTo": issue(g, sel, { kind: "retreat", x: gp[0], y: gp[1] }); break;
+      case "face": {
+        for (const q of this.selSquads()) faceTo(g, q, gp[0], gp[1]);
+        for (const u of sel) if (u.vehicle || !squadOf(g, u) || u.detached) { u.heading = Math.atan2(gp[1] - u.y, gp[0] - u.x); if (u.order.kind === "idle") u.order = { kind: "hold" }; }
+        g.effect("order", gp[0], gp[1], this.s.bf.h(gp[0], gp[1]), 0.45, 1, { col: [0.9, 0.9, 0.4] });
+        break;
+      }
+      case "defendAt": {
+        issue(g, sel, { kind: "defend", x: gp[0], y: gp[1] });
+        g.effect("order", gp[0], gp[1], this.s.bf.h(gp[0], gp[1]), 0.45, 1, { col: [0.4, 0.7, 1] });
+        this.onMessage("Taking up defensive positions.");
+        break;
+      }
       case "follow": { const p = this.pick(x, y); if (p instanceof Unit) issue(g, sel.filter((u) => u !== p), { kind: "follow", target: p.id }); break; }
       case "build": {
         const eng = sel.filter((u) => u.type === "engineer");
@@ -295,7 +320,11 @@ export class Controls {
       case "KeyP": this.command("patrol"); break;
       case "KeyF": this.command("follow"); break;
       case "KeyR": if (this.mode && (this.mode.kind === "fob" || this.mode.kind === "build" || this.mode.kind === "supply")) { this.mode.rot += Math.PI / 2; } else this.command("retreat"); break;
-      case "KeyK": this.command("formation"); break;
+      case "KeyK": this.command(e.shiftKey ? "formationBack" : "formation"); break;
+      case "KeyV": this.command("face"); break;
+      case "KeyY": this.command("regroup"); break;
+      case "KeyJ": this.command("leader"); break;
+      case "KeyN": this.command("newsquad"); break;
       case "KeyU": this.command("unload"); break;
       case "KeyB": this.onPanel("build"); break;
       case "KeyL": this.onPanel("logistics"); break;
@@ -314,23 +343,68 @@ export class Controls {
     switch (c) {
       case "stop": for (const u of sel) { u.queue = []; u.order = { kind: "idle" }; u.path = null; u.focus = null; g.paths.cancel(u); } break;
       case "hold": issue(g, sel, { kind: "hold" }); break;
-      case "defend": issue(g, sel, { kind: "defend" }); break;
+      case "defend":
+        // G: click where to defend; G again defends where the squad stands
+        if (this.mode?.kind === "defendAt") { issue(g, sel, { kind: "defend" }); this.setMode(null); this.onMessage("Defending this position."); }
+        else if (sel.length) this.setMode({ kind: "defendAt", rot: 0 });
+        break;
+      case "face": if (sel.length) this.setMode({ kind: "face", rot: 0 }); break;
+      case "regroup": {
+        const qs = this.selSquads();
+        for (const q of qs) regroup(g, q);
+        if (!qs.length) this.onMessage("Select soldiers of a squad to regroup it.");
+        break;
+      }
+      case "leader": {
+        const one = sel.filter((u) => !u.vehicle);
+        if (one.length !== 1) { this.onMessage("Select one soldier to make him squad leader."); break; }
+        setLeader(g, one[0]);
+        break;
+      }
+      case "newsquad": {
+        const inf = sel.filter((u) => !u.vehicle);
+        if (!inf.length) break;
+        const old = this.selSquads()[0];
+        const q = createSquad(g, inf, undefined, old ? old.formation : "wedge");
+        if (q) { g.radio(`Squad ${q.name} formed: ${inf.length} soldier${inf.length === 1 ? "" : "s"}, led by ${g.get(q.leader)?.name}.`, "radio"); this.selectSquad(q); }
+        break;
+      }
       case "attackMove": if (sel.length) this.setMode({ kind: "attackMove", rot: 0 }); break;
       case "patrol": if (sel.length) this.setMode({ kind: "patrol", rot: 0 }); break;
       case "follow": if (sel.length) this.setMode({ kind: "follow", rot: 0 }); break;
       case "retreat": {
         if (!sel.length) break;
         const fob = g.fob.established && g.fob.site ? [g.fob.site.x, g.fob.site.y] : g.mission ? g.mission.lz : null;
-        if (fob) { issue(g, sel, { kind: "retreat", x: fob[0], y: fob[1] }, { formation: "column" }); this.onMessage(g.fob.established ? "Falling back to the FOB." : "Falling back to the landing zone."); }
+        if (fob) { issue(g, sel, { kind: "retreat", x: fob[0], y: fob[1] }); this.onMessage(g.fob.established ? "Falling back to the FOB." : "Falling back to the landing zone."); }
         break;
       }
-      case "formation": {
-        const order: Formation[] = ["spread", "line", "column", "wedge"];
-        this.formation = order[(order.indexOf(this.formation) + 1) % order.length];
-        this.onMessage(`Formation: ${this.formation}`);
+      case "formation": case "formationBack": {
+        const qs = this.selSquads();
+        const step = c === "formation" ? 1 : FORMATIONS.length - 1;
+        if (qs.length) {
+          const next = FORMATIONS[(FORMATIONS.indexOf(qs[0].formation) + step) % FORMATIONS.length];
+          for (const q of qs) setFormation(g, q, next);
+          this.onMessage(`${qs.map((q) => q.name).join(", ")}: ${FORMATION_LABEL[next]} formation`);
+        } else {
+          const order: Formation[] = ["spread", "line", "column", "wedge"];
+          this.formation = order[(order.indexOf(this.formation) + 1) % order.length];
+          this.onMessage(`Formation: ${this.formation}`);
+        }
         break;
       }
+      case "formMenu": this.formMenu = !this.formMenu; break;
       case "unload": for (const v of sel.filter((u) => u.vehicle && u.passengers.length)) unload(g, v); break;
+      default: {
+        const f = /^form:(\w+)$/.exec(c);
+        if (f && isFormation(f[1])) {
+          const qs = this.selSquads();
+          for (const q of qs) setFormation(g, q, f[1] as FormationKind);
+          if (qs.length) this.onMessage(`${qs.map((q) => q.name).join(", ")}: ${FORMATION_LABEL[f[1] as FormationKind]} formation`);
+          this.formMenu = false;
+        }
+        const sq = /^squad:(\d+)$/.exec(c);
+        if (sq) { const q = g.squads.find((x) => x.id === +sq[1]); if (q) this.selectSquad(q); }
+      }
       case "focus": break;
     }
     this.onChange();

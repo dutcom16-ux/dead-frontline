@@ -4,8 +4,11 @@
 import type { Game } from "../Game";
 import { Zombie, Unit, Civilian, Obstacle } from "../entities";
 import { dist, clamp } from "../core";
+import { maybeInfect } from "./Infection";
 
 const WAKE = 240;
+/** how high a corpse pile must reach (m) before the infected can climb over a defence */
+const CLIMB: Record<string, number> = { sandbags: 0.85, barricade: 1.0, concrete_barrier: 0.9, mg_emplacement: 0.95, wreck: 1.3 };
 
 interface Field { x: number; y: number; f: any; t: number }
 export class FlowFields {
@@ -150,6 +153,11 @@ function updateZombie(g: Game, z: Zombie, dt: number) {
     dx = (z.goalX - z.x) / d; dy = (z.goalY - z.y) / d;
   }
   if (z.stagger > 0) sp *= 0.35;
+  // corpse piles: slow going on top of the bodies
+  const ph = g.pileH(z.x, z.y);
+  if (ph > 0.15 && z.type !== "abomination") sp *= Math.max(0.45, 1 - ph * 0.45);
+  z.climbT = Math.max(0, z.climbT - dt);
+  if (z.climbT > 0) sp *= 0.6;
   // barbed wire slows and cuts
   for (const o of g.obstacles) if (o.kind === "barbed_wire" && !o.dead && o.built >= 1 && Math.abs(o.x - z.x) < 4 && Math.abs(o.y - z.y) < 4 && o.distTo(z.x, z.y) < 0.4) { sp *= o.def!.slow || 0.3; g.damage(z, (o.def!.dps || 3) * dt, null, "melee"); o.hp -= dt * 2; }
   // separation: infected swarm around targets instead of stacking
@@ -161,16 +169,25 @@ function updateZombie(g: Game, z: Zombie, dt: number) {
   z.heading = Math.atan2(dy, dx);
   const step = sp * dt;
   let [nx, ny] = g.bf.phys.move(z.x, z.y, dx * step, dy * step, Math.min(0.45, z.r), "zombie");
-  // defences block the infected; they attack what stops them
-  let blocker: Obstacle | null = null;
+  // defences block the infected; they attack what stops them, or climb over it once the bodies are piled high enough
+  let blocker: Obstacle | null = null, over = 0;
   for (const o of g.obstacles) {
     if (o.dead || !o.blocksZombies || o.built < 1) continue;
     if (Math.abs(o.x - nx) > 6 || Math.abs(o.y - ny) > 6) continue;
+    const climb = CLIMB[o.kind];
+    if (climb !== undefined && z.climbT > 0 && o.distTo(nx, ny) < z.r + 0.3) { over = Math.max(over, climb); continue; }
     const p = o.push(nx, ny, z.r);
-    if (p) { nx = p[0]; ny = p[1]; if (o.kind !== "wreck") blocker = o; }
+    if (!p) continue;
+    if (climb !== undefined && (z.state === "chase" || z.state === "investigate") && Math.max(ph, g.pileH(p[0], p[1])) >= climb && z.type !== "abomination" && z.type !== "brute") {
+      // the pile reaches the top of the defence: over it goes
+      z.climbT = 1.6; over = Math.max(over, climb);
+      if (g.time - g.climbMsgT > 40) { g.climbMsgT = g.time; g.radio(`Infected are climbing the corpse pile over the ${o.def ? o.def.name.toLowerCase() : "barrier"}!`, "warn"); g.onEvent("climb", o); }
+      continue;
+    }
+    nx = p[0]; ny = p[1]; if (o.kind !== "wreck") blocker = o;
   }
   z.x = nx; z.y = ny;
-  z.z = g.bf.h(z.x, z.y);
+  z.z = g.bf.h(z.x, z.y) + Math.max(g.pileH(z.x, z.y), over);
   if (blocker && (z.state === "chase" || z.state === "investigate") && z.attackT <= 0) {
     z.attackT = z.def.attack[1];
     g.damage(blocker, z.def.attack[0] * (z.def.doorBreaker || 1), z.id, "melee");
@@ -201,6 +218,7 @@ function attack(g: Game, z: Zombie, t: any) {
     g.uHash.query(z.x, z.y, z.def.slam.radius, (u) => g.damage(u, dmg * 0.6, z.id, "melee"));
   }
   g.damage(t, dmg, z.id, "melee");
+  if (t instanceof Unit && !t.vehicle) maybeInfect(g, t, z);
   if (!t.vehicle) g.effect("blood", t.x, t.y, t.z, 25, 0.5);
   if (t instanceof Unit && !t.vehicle && z.def.knockback) {
     const d = dist(z.x, z.y, t.x, t.y) || 1;

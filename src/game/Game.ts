@@ -7,6 +7,8 @@ import { updateUnits } from "./units/UnitAI";
 import { updateZombies, FlowFields } from "./zombies/ZombieAI";
 import { updateCombat } from "./combat/Combat";
 import { updateCivilians } from "./units/Civilians";
+import { updateSquads, Squad } from "./units/Squads";
+import { updateInfection, Riser } from "./zombies/Infection";
 import { ZOMBIES, RANKS, SURNAMES } from "./data";
 import type { Mission } from "./missions/Mission";
 import type { Logistics } from "./logistics/Logistics";
@@ -22,7 +24,14 @@ export class Game {
   byId = new Map<number, any>();
   uHash = new SpatialHash<Unit>(10); zHash = new SpatialHash<Zombie>(6); cHash = new SpatialHash<Civilian>(10);
   time = 0; difficulty: Difficulty = "medium";
-  stats = { kills: {} as Record<string, number>, killed: 0, lost: 0, rescued: 0, civLost: 0, shots: 0, supplies: 0, reinforcements: 0 };
+  stats = { kills: {} as Record<string, number>, killed: 0, lost: 0, rescued: 0, civLost: 0, shots: 0, supplies: 0, reinforcements: 0, turned: 0 };
+  squads: Squad[] = []; squadSeq = 0;
+  /** corpse piles: weight of bodies per 1.5 m cell. Piles slow movement, lift whoever stands on them, and let the infected climb defences */
+  piles = new Map<number, number>();
+  risers: Riser[] = [];
+  /** how many soldiers are shooting at each infected this step (spreads fire across targets) */
+  targeted = new Map<number, number>();
+  climbMsgT = -99;
   radioLog: RadioMsg[] = [];
   mission!: Mission; logistics!: Logistics; fob!: Fob;
   onSound: (kind: string, x: number, y: number, vol?: number) => void = () => {};
@@ -141,7 +150,7 @@ export class Game {
     e.hp = 0; e.dead = true;
     if (e instanceof Zombie) this.zombieDied(e, src);
     else if (e instanceof Unit) this.unitDied(e);
-    else if (e instanceof Civilian) { this.stats.civLost++; this.radio("A civilian has been killed.", "bad"); this.corpse(e.x, e.y, e.z, e.heading, [0.5, 0.45, 0.42], 1, "corpse"); }
+    else if (e instanceof Civilian) { this.stats.civLost++; this.radio("A civilian has been killed.", "bad"); this.corpse(e.x, e.y, e.z, e.heading, [0.5, 0.45, 0.42], 1, "corpse", { kind: "civilian" }); }
     else if (e instanceof Nest) {
       this.radio("Infected nest destroyed.", "good");
       this.explode(e.x, e.y, e.z, 6, 0, null, "gore");
@@ -153,7 +162,7 @@ export class Game {
     this.stats.kills[z.type] = (this.stats.kills[z.type] || 0) + 1;
     const s = this.get(src);
     if (s instanceof Unit) { s.kills++; if (s.kills % 25 === 0 && s.rank < 3) { s.rank++; if (!s.vehicle) s.name = s.name.replace(/^\S+/, RANKS[s.rank]); } }
-    this.corpse(z.x, z.y, z.z, z.heading, z.def.color, z.def.size, z.type === "abomination" ? "abomination" : "corpse");
+    this.corpse(z.x, z.y, z.z, z.heading, z.def.color, z.def.size, z.type === "abomination" ? "abomination" : "corpse", { kind: z.type, soldier: z.soldier || undefined, flip: Math.cos(z.heading) < 0 });
     this.effect("blood", z.x, z.y, z.z, 40, 0.8 + z.def.size * 0.5);
     if (z.def.explode) { this.onSound("bloater", z.x, z.y); this.explode(z.x, z.y, z.z, z.def.explode.radius, z.def.explode.damage, null, "gas"); }
     if (z.def.boss) { this.radio("The Abomination is down!", "good"); this.onEvent("boss", z); this.shake = 1; }
@@ -169,15 +178,36 @@ export class Game {
       u.passengers = [];
       this.addObstacle("wreck", u.x, u.y, u.heading);
     } else {
-      this.corpse(u.x, u.y, u.z, u.heading, u.def.color, 1, "corpse");
-      const c = this.corpses[this.corpses.length - 1];
-      c.sprite = true; c.flip = Math.cos(u.heading) < 0; // drawn with the troop sprite sheet's death animation
+      const c = this.corpse(u.x, u.y, u.z, u.heading, u.def.color, 1, "corpse", { sprite: true, kind: "soldier", flip: Math.cos(u.heading) < 0 });
+      // killed while infected: he rises again
+      if (u.infectedAt >= 0) {
+        this.risers.push({ x: u.x, y: u.y, t: this.time + 4, type: u.type, name: u.name, squad: u.squad, corpse: c });
+        this.radio(`${u.name} was infected — he will rise. Keep clear of the body.`, "warn");
+      }
     }
     this.onEvent("udeath", u);
   }
-  corpse(x: number, y: number, z: number, rot: number, col: [number, number, number], s: number, model: string) {
-    this.corpses.push({ x, y, z, rot, col: [col[0] * 0.75, col[1] * 0.7, col[2] * 0.7], s, t: this.time, model });
-    if (this.corpses.length > 320) this.corpses.shift();
+  corpse(x: number, y: number, z: number, rot: number, col: [number, number, number], s: number, model: string, extra: Partial<Corpse> = {}): Corpse {
+    // bodies stack: a new corpse lies on top of the pile already there
+    const pk = this.pileKey(x, y), w = Math.min(2, s);
+    const c: Corpse = { x, y, z: this.bf.h(x, y) + this.pileH(x, y), rot, col: [col[0] * 0.75, col[1] * 0.7, col[2] * 0.7], s, t: this.time, model, pk, w, id: nextId(), ...extra };
+    this.corpses.push(c);
+    this.piles.set(pk, (this.piles.get(pk) || 0) + w);
+    if (this.corpses.length > 600) this.removeCorpse(this.corpses[0]);
+    return c;
+  }
+  removeCorpse(c: Corpse) {
+    const i = this.corpses.indexOf(c);
+    if (i < 0) return;
+    this.corpses.splice(i, 1);
+    if (c.pk !== undefined) { const n = (this.piles.get(c.pk) || 0) - (c.w || 1); if (n > 0.01) this.piles.set(c.pk, n); else this.piles.delete(c.pk); }
+  }
+  pileKey(x: number, y: number) { return (Math.floor(x / 1.5) + 32768) * 65536 + (Math.floor(y / 1.5) + 32768); }
+  /** height of the corpse pile at a point (m): about 0.17 m per body, up to 1.7 m */
+  pileH(x: number, y: number) { const n = this.piles.get(this.pileKey(x, y)); return n ? Math.min(1.7, n * 0.17) : 0; }
+  rebuildPiles() {
+    this.piles.clear();
+    for (const c of this.corpses) { c.pk = this.pileKey(c.x, c.y); c.w = c.w || Math.min(2, c.s); this.piles.set(c.pk, (this.piles.get(c.pk) || 0) + c.w); }
   }
   destroyObstacle(o: Obstacle) {
     o.dead = true;
@@ -220,9 +250,11 @@ export class Game {
     for (const z of this.zombies) if (!z.dead) this.zHash.insert(z);
     for (const c of this.civs) if (!c.dead && c.state !== "gone") this.cHash.insert(c);
     this.paths.update(3);
+    updateSquads(this, dt);
     updateUnits(this, dt);
     this.flow.update(dt);
     updateZombies(this, dt);
+    updateInfection(this);
     updateCivilians(this, dt);
     updateCombat(this, dt);
     this.logistics && this.logistics.update(dt);
@@ -247,6 +279,8 @@ export class Game {
     const deadUnits = this.units.filter((u) => u.dead);
     if (deadUnits.length) { this.units = this.units.filter((u) => !u.dead); for (const u of deadUnits) this.byId.delete(u.id); }
     this.transports = this.transports.filter((t) => !t.done);
+    // bodies are cleared after five minutes
+    while (this.corpses.length && this.time - this.corpses[0].t > 300) this.removeCorpse(this.corpses[0]);
   }
   newTransportId() { return nextId(); }
 }

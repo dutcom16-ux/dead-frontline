@@ -11,7 +11,8 @@
     "test": "node test/playthrough.test.mjs dist low",
     "test:medium": "node test/playthrough.test.mjs dist medium",
     "test:systems": "node test/systems.mjs",
-    "test:mobile": "node test/mobile.mjs"
+    "test:mobile": "node test/mobile.mjs",
+    "test:formations": "node test/formations.mjs dist"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

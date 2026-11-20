@@ -5,14 +5,41 @@ import { Unit, Zombie, Obstacle, Crate, Civilian, Nest, Order, Formation } from 
 import { dist, clamp } from "../core";
 import { fire } from "../combat/Combat";
 import { STRUCTURES } from "../data";
+import { Squad, squadOf, liveMembers, squadOrders, SQUAD_ORDERS, angDiff } from "./Squads";
 
 const TURN = 7;
+/** orders that pull one soldier out of his squad until the job is done */
+const TASK_ORDERS = new Set(["interact", "build", "clear"]);
 
-export function issue(g: Game, units: Unit[], o: Order, opts: { queue?: boolean; formation?: Formation } = {}) {
-  const live = units.filter((u) => u.alive && u.inVehicle === null);
+/**
+ * Give an order to a selection. Squads that are selected whole take it as a squad (formation
+ * movement, see Squads.ts). Soldiers picked out of a squad act on their own (detached) until the
+ * squad is ordered as a whole again or regroups.
+ */
+export function issue(g: Game, units: Unit[], o: Order, opts: { queue?: boolean; formation?: Formation | string } = {}) {
+  const sel = units.filter((u) => u.alive && u.inVehicle === null);
+  if (!sel.length) return;
+  const live: Unit[] = [];
+  const whole: Squad[] = [];
+  if (SQUAD_ORDERS.has(o.kind)) {
+    const by = new Map<Squad, Unit[]>();
+    for (const u of sel) {
+      const sq = u.vehicle ? null : squadOf(g, u);
+      if (!sq) { live.push(u); continue; }
+      let a = by.get(sq); if (!a) by.set(sq, (a = [])); a.push(u);
+    }
+    for (const [sq, us] of by) {
+      const all = liveMembers(g, sq).filter((m) => m.inVehicle === null);
+      if (all.every((m) => us.includes(m))) whole.push(sq);
+      else for (const u of us) { u.detached = true; u.task = false; u.speedCap = Infinity; u.squadHalt = false; live.push(u); }
+    }
+  } else {
+    for (const u of sel) { if (!u.vehicle && u.squad) { u.detached = true; u.task = TASK_ORDERS.has(o.kind); u.speedCap = Infinity; u.squadHalt = false; } live.push(u); }
+  }
+  if (whole.length) squadOrders(g, whole, o, opts, (u, oo, q) => give(g, u, oo, q));
   if (!live.length) return;
   if (o.kind === "move" || o.kind === "attackMove" || o.kind === "retreat" || o.kind === "patrol") {
-    const slots = formationSlots(g, live, o.x!, o.y!, opts.formation || "spread");
+    const slots = formationSlots(g, live, o.x!, o.y!, (opts.formation as Formation) || "spread");
     live.forEach((u, k) => {
       const [sx, sy] = slots[k];
       const oo: Order = { ...o, x: sx, y: sy };
@@ -34,7 +61,7 @@ function start(g: Game, u: Unit, o: Order) {
   u.path = null; u.pathGoal = null; u.stuckT = 0;
   if (o.kind !== "attack") u.focus = null;
   if (o.kind === "attack") u.focus = o.target ?? null;
-  if (o.kind === "defend") u.defendAt = [u.x, u.y];
+  if (o.kind === "defend") u.defendAt = o.x !== undefined ? [o.x, o.y!] : [u.x, u.y];
   if (o.kind === "hold" || o.kind === "idle" || o.kind === "defend") { g.paths.cancel(u); return; }
   const dest = destOf(g, u, o);
   if (dest) goTo(g, u, dest[0], dest[1]);
@@ -79,6 +106,8 @@ export function formationSlots(g: Game, units: Unit[], x: number, y: number, f: 
 }
 
 export function updateUnits(g: Game, dt: number) {
+  g.targeted.clear();
+  for (const u of g.units) if (u.alive && u.target != null) g.targeted.set(u.target, (g.targeted.get(u.target) || 0) + 1);
   for (const u of g.units) {
     if (!u.alive) continue;
     if (u.inVehicle !== null) {
@@ -97,13 +126,20 @@ function updateUnit(g: Game, u: Unit, dt: number) {
   u.suppression = Math.max(0, u.suppression - dt * 0.22);
   u.cool = Math.max(-1, u.cool - dt); u.hitT = Math.max(0, u.hitT - dt); u.flashT = Math.max(0, u.flashT - dt);
   if (u.burn > 0) { u.burn -= dt; g.damage(u, 8 * dt, null, "fire"); if (!u.alive) return; }
-  // reload
+  // a soldier pulled out for a job (crate, build, wreck) rejoins his squad when it is done
+  if (u.detached && u.task && u.order.kind === "idle" && !u.vehicle) {
+    const sq = squadOf(g, u);
+    if (sq) { u.detached = false; u.task = false; u.order = { kind: "formation" }; sq.dirty = true; }
+  }
+  // reload (also a tactical reload in a lull, so magazines are full when the next wave comes)
   if (u.reloadT > 0) {
     u.reloadT -= dt;
     if (u.reloadT <= 0 && u.weapon) { const take = Math.min(u.weapon.mag - u.mag, u.reserve); u.mag += take; u.reserve -= take; }
   } else if (u.weapon && u.mag <= 0 && u.reserve > 0) {
     u.reloadT = u.weapon.reload * (u.vehicle ? 1 : 1 - u.rank * 0.05);
     g.onSound("reload", u.x, u.y, 0.5);
+  } else if (u.weapon && !u.vehicle && u.target === null && u.mag < u.weapon.mag * 0.4 && u.reserve > 0 && u.weapon.mag > 1) {
+    u.reloadT = u.weapon.reload * (1 - u.rank * 0.05);
   } else if (u.weapon && u.mag <= 0 && u.reserve <= 0 && Math.floor(g.time / 15) !== Math.floor((g.time - dt) / 15)) {
     g.radio(`${u.name}: out of ammo! Request an ammunition drop.`, "warn");
   }
@@ -136,9 +172,10 @@ function updateUnit(g: Game, u: Unit, dt: number) {
   // ---- movement
   // on an attack order, keep pushing to the target and shoot on the move; only the target itself or a close threat stops the unit
   const close = engaging && dist(u.x, u.y, tgt.x, tgt.y) < 8;
-  const stopToFire = engaging && (o.kind === "attackMove" || o.kind === "patrol" || !canFireWhileMoving(u) || (o.kind === "attack" && (tgt.id === u.focus || close)));
+  const stopToFire = (engaging && (o.kind === "attackMove" || o.kind === "patrol" || !canFireWhileMoving(u) || (o.kind === "attack" && (tgt.id === u.focus || close)))) || u.squadHalt;
   let moved = false;
-  if (u.path && !stopToFire && o.kind !== "hold") moved = followPath(g, u, dt, o.kind === "retreat" ? 1.15 : 1);
+  if (o.kind === "formation") moved = formationMove(g, u, dt, engaging);
+  else if (u.path && !stopToFire && o.kind !== "hold") moved = followPath(g, u, dt, o.kind === "retreat" ? 1.15 : 1);
   else u.speedNow = 0;
   if (!u.path && !u.pathPending && (o.kind === "move" || o.kind === "attackMove" || o.kind === "retreat")) nextOrder(g, u);
   if (!u.path && !u.pathPending && o.kind === "patrol") {
@@ -152,7 +189,7 @@ function updateUnit(g: Game, u: Unit, dt: number) {
     const want = Math.atan2(tgt.y - u.y, tgt.x - u.x);
     if (!moved || u.vehicle) u.heading = turn(u.heading, want, dt * TURN);
     if (!moved || canFireWhileMoving(u)) fire(g, u, tgt, moved);
-  }
+  } else if (!moved && o.kind === "formation" && !isNaN(u.slotFace)) u.heading = turn(u.heading, u.slotFace, dt * 3);
   // ---- roles
   if (u.def.heal) medic(g, u, dt);
   if (u.vehicle) vehicle(g, u, dt);
@@ -169,6 +206,9 @@ function acquire(g: Game, u: Unit) {
   u.losOk = false;
   if (!u.weapon) { u.target = null; return; }
   const range = Math.min(u.weapon.range, u.vehicle ? u.weapon.range : Math.max(u.def.sight, 20));
+  // in a halted formation each soldier covers his own arc (the way his slot faces)
+  const sq = u.order.kind === "formation" ? squadOf(g, u) : null;
+  const sector = sq && sq.halted && !isNaN(u.slotFace) ? u.slotFace : NaN;
   const eye = u.z + (u.vehicle ? 2.4 : 1.5);
   const ph = g.bf.phys;
   const visible = (t: any) => {
@@ -187,7 +227,15 @@ function acquire(g: Game, u: Unit) {
   if (cur && !cur.dead && cur instanceof Zombie && dist(u.x, u.y, cur.x, cur.y) <= range && visible(cur)) { u.losOk = true; return; }
   const cand: [number, Zombie][] = [];
   const scan = f && !f.dead && u.order.kind === "attack" ? Math.min(range, 18) : range;
-  g.zHash.query(u.x, u.y, scan, (z, d) => { if (!z.dead) cand.push([d - (z.state === "chase" || z.state === "attack" ? 6 : 0) - (z.def.boss ? 8 : 0), z]); });
+  g.zHash.query(u.x, u.y, scan, (z, d) => {
+    if (z.dead) return;
+    let sc = d - (z.state === "chase" || z.state === "attack" ? 6 : 0) - (z.def.boss ? 8 : 0);
+    // spread fire: infected others are already shooting at count for less (not up close)
+    const n = g.targeted.get(z.id) || 0;
+    if (n && d > 6 && !z.def.boss) sc += n * (z.hp < 120 ? 6 : 3);
+    if (!isNaN(sector) && d > 7 && Math.abs(angDiff(sector, Math.atan2(z.y - u.y, z.x - u.x))) > 1.4) sc += 14;
+    cand.push([sc, z]);
+  });
   cand.sort((a, b) => a[0] - b[0]);
   for (let k = 0; k < Math.min(5, cand.length); k++) {
     const z = cand[k][1];
@@ -201,7 +249,7 @@ function acquire(g: Game, u: Unit) {
   u.target = null;
 }
 
-function followPath(g: Game, u: Unit, dt: number, mult: number): boolean {
+function followPath(g: Game, u: Unit, dt: number, mult: number, want?: number): boolean {
   const p = u.path!;
   if (u.pathIdx >= p.length) { u.path = null; return false; }
   let [wx, wy] = p[u.pathIdx];
@@ -222,15 +270,22 @@ function followPath(g: Game, u: Unit, dt: number, mult: number): boolean {
   }
   // slow when wounded or burning
   if (!u.vehicle && u.hp < u.maxHp * 0.3) sp *= 0.75;
-  const want = Math.atan2(wy - u.y, wx - u.x);
+  if (!u.vehicle) {
+    sp = Math.min(sp, u.speedCap);           // a squad leader keeps the squad's pace
+    if (want !== undefined) sp = Math.min(sp, want);
+    const ph = g.pileH(u.x, u.y);
+    if (ph > 0.15) sp *= Math.max(0.55, 1 - ph * 0.35); // clambering over bodies
+    if (last && d < 1.2) sp *= Math.max(0.4, d / 1.2); // ease into the end point
+  }
+  const wantA = Math.atan2(wy - u.y, wx - u.x);
   if (u.vehicle) {
-    u.heading = turn(u.heading, want, dt * 1.6);
-    const off = Math.abs(Math.atan2(Math.sin(want - u.heading), Math.cos(want - u.heading)));
+    u.heading = turn(u.heading, wantA, dt * 1.6);
+    const off = Math.abs(Math.atan2(Math.sin(wantA - u.heading), Math.cos(wantA - u.heading)));
     sp *= off > 1.2 ? 0.15 : 1 - off * 0.5;
     u.speedNow = Math.min(sp, u.speedNow + dt * 3);
-  } else { u.heading = turn(u.heading, want, dt * TURN); u.speedNow = sp; }
+  } else { u.heading = turn(u.heading, wantA, dt * TURN); u.speedNow = u.speedNow < sp ? Math.min(sp, u.speedNow + dt * 5) : sp; }
   const step = Math.min(d, u.speedNow * dt);
-  const dir = u.vehicle ? u.heading : want;
+  const dir = u.vehicle ? u.heading : wantA;
   // vehicles use a slimmer collision circle so they fit the streets the grid planner finds (0.5 m cells)
   const rr = u.vehicle ? 0.9 : 0.3;
   let [nx, ny] = g.bf.phys.move(u.x, u.y, Math.cos(dir) * step, Math.sin(dir) * step, rr, "human");
@@ -244,14 +299,15 @@ function followPath(g: Game, u: Unit, dt: number, mult: number): boolean {
   u.x = nx; u.y = ny;
   if (!u.vehicle) openDoors(g, u.x, u.y, Math.cos(dir), Math.sin(dir));
   pushObstacles(g, u);
-  u.z = g.bf.h(u.x, u.y);
+  u.z = g.bf.h(u.x, u.y) + (u.vehicle ? 0 : g.pileH(u.x, u.y));
   // stuck: local detour to a waypoint a few metres ahead, then skip, then nudge to a free cell, then re-plan
   u.stuckT += dt;
   if (u.stuckT > 1.2) {
     // progress is measured from an anchor that only moves once the unit has really advanced
     const moved = dist(u.x, u.y, u.lastX, u.lastY);
     u.stuckT = 0;
-    if (moved > Math.max(1.2, 0.5 * sp * Math.min(3, u.stuckN + 1))) { u.lastX = u.x; u.lastY = u.y; u.stuckN = 0; }
+    // walking slowly on purpose (waiting for the squad, easing in) is not being stuck
+    if (moved > Math.max(1.2, 0.5 * sp * Math.min(3, u.stuckN + 1)) || (!u.vehicle && sp < 1.3)) { u.lastX = u.x; u.lastY = u.y; u.stuckN = 0; }
     else if (u.vehicle && u.speedNow < 1) { /* still turning on the spot: not stuck yet */ }
     else {
       u.stuckN++;
@@ -284,6 +340,60 @@ function followPath(g: Game, u: Unit, dt: number, mult: number): boolean {
     }
   }
   return step > 0.001;
+}
+
+/**
+ * A squad member keeps to his formation slot: straight at it while the way is clear, along a planned
+ * path when it is not. On the move he keeps pace with the leader and catches up when behind; once
+ * the squad halts he eases into the slot and stands.
+ */
+function formationMove(g: Game, u: Unit, dt: number, engaging: boolean): boolean {
+  const sq = squadOf(g, u);
+  if (!sq || isNaN(u.slotX)) { u.speedNow = 0; return false; }
+  const L = g.get(sq.acting) as Unit | null;
+  const travelling = !sq.halted && !!L && L !== u;
+  const tx = u.slotX, ty = u.slotY;
+  const d = dist(u.x, u.y, tx, ty);
+  const max = u.def.speed * (1 - u.suppression * 0.35) * (u.hp < u.maxHp * 0.3 ? 0.75 : 1) * (L && L.order.kind === "retreat" ? 1.15 : 1);
+  if (!travelling && (d < 0.6 || sq.hold)) { u.path = null; u.speedNow = 0; return false; }
+  // heavy weapons settle and fire once the squad has stopped and they are nearly in place
+  if (!travelling && engaging && !canFireWhileMoving(u) && d < 3) { u.speedNow = 0; return false; }
+  let want = travelling ? clamp(L!.speedNow + d * 1.2, 0, max * 1.25) : Math.min(max, 0.8 + d * 1.5);
+  // the straight line to the slot is blocked: plan a path (rate limited)
+  if (g.time - u.formClearT > 0.33) { u.formClearT = g.time; u.formClear = d < 0.8 || g.bf.phys.clearLine(u.x, u.y, tx, ty, "human", 0.25); }
+  if (!u.formClear) {
+    const stale = !u.pathGoal || dist(u.pathGoal[0], u.pathGoal[1], tx, ty) > 4;
+    if (!u.pathPending && (!u.path || stale) && g.time - u.formT > 1.2) { u.formT = g.time; u.pathGoal = [tx, ty]; g.paths.request(u, tx, ty); }
+    if (u.path) return followPath(g, u, dt, 1, Math.max(want, 1.6));
+    u.speedNow = 0;
+    return false;
+  }
+  u.path = null;
+  const ph = g.pileH(u.x, u.y);
+  if (ph > 0.15) want *= Math.max(0.55, 1 - ph * 0.35);
+  u.speedNow += clamp(want - u.speedNow, -8 * dt, 5 * dt);   // natural acceleration and braking
+  const step = Math.min(d, Math.max(0, u.speedNow) * dt);
+  if (step < 1e-4) return false;
+  const dir = Math.atan2(ty - u.y, tx - u.x);
+  let [nx, ny] = g.bf.phys.move(u.x, u.y, Math.cos(dir) * step, Math.sin(dir) * step, 0.3, "human");
+  if (dist(nx, ny, u.x, u.y) < step * 0.3) {
+    for (const da of [0.6, -0.6, 1.2, -1.2]) {
+      const [sx, sy] = g.bf.phys.move(u.x, u.y, Math.cos(dir + da) * step, Math.sin(dir + da) * step, 0.3, "human");
+      if (dist(sx, sy, u.x, u.y) > step * 0.5) { nx = sx; ny = sy; break; }
+    }
+  }
+  // turn to walk only when really going somewhere: no about-turns for small corrections
+  if (d > 0.9 && !engaging) u.heading = turn(u.heading, dir, dt * TURN);
+  u.x = nx; u.y = ny;
+  u.z = g.bf.h(u.x, u.y) + g.pileH(u.x, u.y);
+  openDoors(g, u.x, u.y, Math.cos(dir), Math.sin(dir));
+  // no progress: plan a path instead
+  u.formStuckT += dt;
+  if (u.formStuckT > 1.5) {
+    if (dist(u.x, u.y, u.formLastX, u.formLastY) < 0.4 && d > 1) { u.formClear = false; u.formClearT = g.time + 1.5; }
+    u.formStuckT = 0; u.formLastX = u.x; u.formLastY = u.y;
+  }
+  return true;
 }
 
 function pushObstacles(g: Game, u: Unit) {

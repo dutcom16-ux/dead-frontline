@@ -37,11 +37,16 @@ can install it as an app from Chrome, Edge or Brave.
 |---|---|
 | Real Toledo City battlefield | ✔ your map package: the OSM road network, coast, landmarks, buildings. Chunk streaming, LOD, frustum culling |
 | Isometric 2.5D camera | ✔ orthographic, 90° rotation (Q/E), WASD/arrows, edge scroll, wheel/pinch zoom, drag pan, bounds, smoothing |
-| RTS controls | ✔ click/box/shift/double-click select, control groups, right-click move/attack/board/collect, queued orders (Shift), formations |
+| RTS controls | ✔ click/box/shift select, double-click selects a squad, squad chips, control groups, right-click move/attack/board/collect, queued orders (Shift) |
+| Squads & formations | ✔ every soldier belongs to a squad with one leader (Alpha at the start; each reinforcement team arrives as its own squad; rescued soldiers join the nearest squad). Six formations: wedge, line, column, box, circle, defensive. Members hold slots that swing round with the squad on curved paths, plan their own path when the way is blocked, and fall into file in narrow streets. The leader sets the pace and waits for stragglers. Several squads move side by side without mixing |
+| Formation combat | ✔ on attack-move the squad stops to fight; line, wedge and column turn to face the threat (also from behind); in a halted formation each soldier covers his own arc; fire spreads across targets; reloads in lulls; medics and engineers go in the middle of a box or circle; the radio warns when the squad is surrounded; too many infected at close range break the formation (soldiers fall back on their own, still shooting) and the squad regroups when the pressure drops |
+| Command | ✔ if the leader is killed or infected, the best remaining soldier takes command and the squad carries on with its order; you can name a new leader |
+| Infection | ✔ a bite can infect a soldier (5 % per bite on medium, less with armour; ×0.5 on low, ×1.5 on high). He turns 22–36 s later (countdown over his head), and the new infected goes for his own squad. A soldier killed while infected rises 4 s later |
+| Corpse piles | ✔ bodies stack where they fall (1.5 m cells, about 0.17 m per body, up to 1.7 m). Piles slow anyone crossing them, lift whoever stands on them, and once a pile reaches the top of sandbags, a barricade, a concrete barrier, an MG nest or a wreck, the infected climb over it |
 | Commands | ✔ move, attack-move, attack (focus fire), stop, hold, defend, patrol, follow, retreat, interact, board/unload, build, clear wreck |
 | Infantry (10) | ✔ rifleman, assault, sniper, machine gunner, shotgun, flamethrower, rocket, medic (heals), engineer (builds, clears), special forces. The starting squad has 9: two riflemen, assault, MG, sniper, shotgun, rocket, medic, engineer |
 | Vehicles (6) | ✔ jeep, APC, IFV, tank, transport truck (ammo for nearby infantry), recovery vehicle (repairs). You get them through logistics once the FOB motor pool is built, and they arrive at the FOB gate. They crush infected, carry passengers (right-click a vehicle to board, U to unload) and draw as simple box models |
-| Infected (8) | ✔ walker, runner, crawler, brute (knockback, breaks doors), bloater (explodes), screamer (calls hordes), mutant (leaps), Abomination (boss, ground slam) |
+| Infected (8) | ✔ walker, runner, crawler, brute (knockback, breaks doors), bloater (explodes), screamer (calls hordes), mutant (leaps), Abomination (boss, ground slam). Drawn from your sprite sheet (the Abomination stays a 3D model) |
 | Infected AI | ✔ sight with line of sight, hearing (gunfire, explosions, screams), pursuit with shared flow fields, swarming, losing targets, investigating noise, breaking doors and defences, attacking vehicles |
 | Combat | ✔ per-weapon damage, range, rate, magazine, reserve, reload, accuracy (range, movement, suppression, rank), armor, suppression, pellets, piercing, rockets and shells, explosions with friendly fire, fire and burning, building damage, line of sight |
 | Mission 01 | ✔ 11 objectives at real places, survivors and helicopter evacuation, military survivors who join you, nests, boss, wrecks, victory/defeat, debrief |
@@ -53,6 +58,21 @@ can install it as an app from Chrome, Edge or Brave.
 | Audio | ✔ synthesised WebAudio effects (weapons, explosions, infected, radio, helicopters). No audio files needed |
 | Offline / PWA | ✔ service worker precache, IndexedDB saves (falls back to localStorage, then memory), installable, Brave Shields handled |
 | Touch | ✔ tap select/command, drag pan, pinch zoom, long-press or ▭ box select, on-screen buttons |
+
+## Squad and formation controls
+
+| Do this | How |
+|---|---|
+| Select one soldier / a whole squad | click / double-click a soldier, or tap a squad chip (bottom left); tap a chip twice to centre on it |
+| Choose a formation | **K** cycles (Shift+K back), or the formation button opens a menu: Wedge, Line, Column, Box, Circle, Defensive |
+| Move / attack-move | right-click / **Z**. Select the whole squad to move it in formation; picking out some soldiers sends them on their own (they show as *detached*) |
+| Hold position | **H**: every soldier stays exactly where he is |
+| Defend a position | **G**, then click the spot: soldiers spread round it and man nearby sandbags, barriers and MG nests first. **G** twice defends where the squad stands |
+| Face a direction | **V**, then click: the formation turns that way |
+| Regroup | **Y**: detached soldiers rejoin and the squad forms up on its leader |
+| Make leader | select one soldier, **J** |
+| New squad | select soldiers, **N**: they leave their squads and form a new one |
+| Retreat | **R**: back to the FOB (or the landing zone) |
 
 ## Tested
 
@@ -68,12 +88,43 @@ Results on the current map (your `toledo_poblacion.html` package, 422 OSM buildi
 
 | Run | Result |
 |---|---|
-| Low infection | **16/16 criteria pass, 0 page errors.** Toledo liberated after ~45 game minutes, 19 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state (IndexedDB) |
-| Medium infection | **16/16 criteria pass, 0 page errors.** Toledo liberated after ~73 game minutes (525 infected killed, 15 losses), all 19 survivors evacuated |
+| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~60 game minutes, 231 infected killed, 4 losses, 16 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
+| Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~67 game minutes (389 infected killed, 16 losses), all 19 survivors evacuated |
 | Systems check (`npm run test:systems`) | vehicles drive and carry passengers; engineer-built sandbags + MG emplacement stop a horde; artillery strike; debrief → strategic map with Toledo green and the next operation unlocked; 0 errors |
-| Phones (`npm run test:mobile`) | Android-sized landscape and portrait layouts; tap select works; 0 errors |
+| Phones (`npm run test:mobile`) | Android-sized landscape and portrait layouts with the squad chips and 14 commands; tap select works; 0 errors |
+| Formations (`npm run test:formations`) | **20/20 checks pass, 0 page errors** — the 10 scenarios of the spec plus corpse-pile climbing, defensive positions, player commands and all six shapes (details below) |
 
-Playing on this map found two real problems, both fixed:
+Formation scenarios (`test/formations.mjs`, each on a fresh squad at the landing zone):
+
+| # | Scenario | Measured |
+|---|---|---|
+| 1 | Line moves without overlapping | closest two soldiers 2.5 m apart all the way; line gaps exactly 3.0 m on arrival |
+| 2 | Line → column | 20 m file, nobody more than 1.1 m off the centre line |
+| 3 | Wedge turns 90° | formation swings at ≤ 1.3 rad/s (no snapping); soldiers 0.5 m off their slots on average after the turn |
+| 4 | A member dies | 8 soldiers re-spaced, no hole in the line |
+| 5 | Leader dies on the move | the next soldier takes command, the squad keeps moving and arrives |
+| 6 | Fire while holding positions | 12/12 infected killed, 6 of 9 soldiers firing, nobody more than 0.6 m from his slot |
+| 7 | Infected from four sides (circle) | 20/20 killed, kills in all four directions, outward-facing slots |
+| 7b | Infected from behind (line) | the line swings round in 1.2 s and ends facing them |
+| 8 | Overwhelmed | 26 infected on a 5-man squad: the formation breaks after ~2 s and soldiers fall back |
+| 9 | Infected leader | command passes on the bite; he turns and goes for his own squad |
+| 10 | After the turn | the squad kills him and re-forms 8 soldiers in 8 slots |
+| 11 | Corpse pile at a sandbag wall | 3 riflemen vs. waves of 40: bodies pile ~1 m high, the infected climb the 0.9 m sandbags and overrun the line |
+| 12 | Defend a position | one soldier mans the MG nest, two take the sandbags, the rest spread round the point |
+| 13 | Player commands | set leader, face, two soldiers detached and regrouped, hold, two squads moving independently |
+
+Running the mission with squads found three problems, all fixed:
+
+* A leader sent off on a job (picking up a crate) kept taking command back as he returned, and the
+  squad restarted its route every time. Now a stand-in leads until the leader has caught up and stayed
+  with the squad for 3 s, and whoever leads carries on along the same route.
+* Squads attacking a nest in dense streets trailed behind the leader and never got a line of fire.
+  An attack on a nest or a structure is now an assault: each soldier finds his own firing position,
+  and the squad re-forms on its leader when the target is destroyed.
+* On medium the task force was wiped out at the Plaza: a broken formation fell back without
+  shooting. Falling back is now a fighting withdrawal (soldiers shoot on the move).
+
+Playing on this map earlier found two real problems, both fixed:
 
 * Paths round very large buildings (the market hall) fell back to a straight line through the
   walls. A wider second search now goes round them.
@@ -92,13 +143,20 @@ run by the automated test.
   logistics with stock 0 and is locked behind a campaign flag.
 * **Strategic map coastlines.** Operation markers sit at real coordinates, but island outlines are not
   drawn. Natural Earth data could be added.
-* **Art.** Infantry now use your troop sprite sheet (see below). Infected, vehicles and defences are
-  still code-generated low-poly placeholders. Buildings use the procedural Philippine archetypes from
-  the Toledo map engine.
-* **Troop sprites: no back view, one look for all classes.** The sheet's art has front-facing and
-  right-facing poses only (its direction labels don't match the drawings). Left is the right view
-  mirrored, and soldiers walking away from the camera use the side view. Every infantry class (rifleman,
-  medic, sniper, ...) uses the same soldier art; tell them apart by the labels and the selection panel.
+* **Art.** Soldiers and infected use your two sprite sheets (see `docs/ASSETS.md`). The Abomination,
+  living civilians, vehicles and defences are still code-generated low-poly models. Buildings use the
+  procedural Philippine archetypes from the Toledo map engine.
+* **Sprite directions are approximate.** The sheets' direction labels don't match the drawings. The art
+  has front, three-quarter front, side and back views, so the game draws eight directions from those
+  (west = east mirrored). There is no walk cycle from behind: a soldier walking away from the camera
+  uses the two back frames with a step bob, and a diagonal away from the camera uses the side cycle.
+  Infected have no back walk either. Every infantry class uses the same soldier art; bloater, brute,
+  screamer and mutant are the walker art tinted and scaled.
+* **Infection has no cure.** Medics heal wounds, not bites. Once infected, a soldier will turn.
+* **Corpse piles don't block shots.** Piles slow movement and let the infected climb defences, but
+  bullets and line of sight pass over them. The infected cannot climb walls, gates, bunkers or towers.
+* **Surrounded squads don't switch formation by themselves.** The radio tells you to form a circle or
+  box; the switch is your order (as the spec asks). Breaking under pressure and regrouping are automatic.
 * **Infected vs. FOB buildings.** Infected attack defences, gates and doors. They do not damage the
   FOB facility buildings themselves.
 * **Vehicles in tight alleys.** Vehicles plan on the same 0.5 m grid as infantry. They back up and
@@ -146,11 +204,13 @@ src/game/missions/         Mission framework, op01 (Toledo)
 src/game/fob/              the single FOB
 src/game/logistics/        supply requests and transports
 src/game/campaign/         campaign state      src/game/save/   save slots
-src/game/rendering/        Models (placeholder art), SceneRender, Sprites (troop sprite sheet)
+src/game/rendering/        Models (placeholder art), SceneRender, Sprites (soldier and infected sprite sheets)
+src/game/units/Squads.ts   squads, leaders, formations, formation movement and combat
+src/game/zombies/Infection.ts  bites, turning, rising
 src/game/ui/               Hud, Menus          src/game/audio/  Sfx
 data/                      units, weapons, vehicles, infected, structures, supplies, campaign, missions (JSON)
 public/                    map package, troop sprite sheet, icons, manifest
-tools/slice_sprites.py     cuts assets/source/troops_sheet.png into public/sprites/
+tools/slice_sprites.py     cuts the two sheets in assets/source/ into public/sprites/
 tools/                     build, dev server, service-worker template
 test/                      headless playthrough
 ```

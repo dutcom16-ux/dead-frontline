@@ -1,25 +1,42 @@
 # Art and audio assets
 
-Infantry and combat effects come from a sprite sheet. Every other visual and every sound is generated
-in code. When you have more art, this is where it plugs in.
+Soldiers, infected and combat effects come from two sprite sheets. Every other visual and every sound
+is generated in code. When you have more art, this is where it plugs in.
 
-## Troop sprite sheet (`public/sprites/troops.png` + `troops.json`)
+## Sprite sheets (`public/sprites/troops.*` and `zombies.*`)
 
-* **Source:** the sprite sheet you supplied (`assets/source/troops_sheet.png`, 1536×1024). Record its
-  licence here. The Vercel site is public, so the sheet must be one you may redistribute.
-* **Slicing:** `python3 tools/slice_sprites.py` cuts the sheet into a packed atlas. Soldiers: the black
-  background is removed by a flood fill from the cell border. Effects: brightness becomes alpha. Each
-  frame stores its feet anchor (`ax`, `ay`).
-* **Clips in use:** `idle_front`, `walk_front`, `walk_side`, `run_front`, `run_side`, `aim_side`,
-  `fire_side`, `reload_front`, `hurt_front`, `die_front` (last frame = lying), `crouch_front`, and the
-  effects `explosion`, `smoke`, `bloodhit`, `sparks`. `muzzle` and `blood` are sliced but not used yet.
-* **Directions:** front clips face the viewer and side clips face screen-right. The renderer mirrors the
-  side clips for left. The sheet has no back view.
-* **Drawing:** `src/game/rendering/Sprites.ts` draws them on the 2D overlay, sorted by screen depth,
-  sized to about 2.4 m (never below 18 px). A soldier behind a building is drawn at 45 % opacity.
-* **Fallback:** if `troops.png` or `troops.json` fails to load, the game draws the old 3D soldiers.
+* **Sources:** the two sheets you supplied:
+  * `assets/source/squad_zombie_sheet.png` (8086.png): soldier movement, aim and death frames and all
+    infected frames.
+  * `assets/source/troops_sheet.png` (8085.png): reload and crouch frames, plus the effects
+    (muzzle flash, explosion, smoke, blood, sparks).
 
-To swap in a different sheet, keep the clip names, rerun the slicer with new cell boxes, and rebuild.
+  Record their licence here. The Vercel site is public, so the sheets must be ones you may redistribute.
+* **Slicing:** `python3 tools/slice_sprites.py` cuts both sheets into two packed atlases (256-colour
+  PNG with alpha):
+  * Black backgrounds are removed by a flood fill from the cell border, with thin dark seams kept
+    inside the figure.
+  * The old sheet's soldiers are recoloured and scaled to match the new sheet.
+  * Each frame stores its feet anchor (`ax`, `ay`), a scale (`k`) and, for aiming frames, the muzzle
+    point (`mx`, `my`).
+* **Directions:** the sheets' direction labels don't match the drawings, so clips are named by what
+  the art shows:
+  * `S` = facing the viewer, `SE` = three-quarter front-right, `E` = facing screen-right,
+    `N` = back to the viewer.
+  * West-facing views are mirrored at draw time.
+* **Soldier clips:** `idle_S`, `idle_S2`, `ready_S`, `aim_SE`, `back_N`, `walk_S`, `walk_SE`,
+  `walk_SE2`, `walk_E`, `kneel_E`, `run_SE`, `run_SE2`, `run_E`, `advance_E` (walking while
+  aiming), `die_E`, `reload_S`, `crouch_S`.
+* **Infected clips:** `idle_S`, `idle_S2`, `back_N`, `attack_E`, `walk_S`, `walk_S2`, `walk_S3`,
+  `walk_E`, `hunch_E`, `lunge_E`, `run_E`, `run_E2`, `run_E3`, `charge_E`, `crawl_E`, `dead`.
+* **Drawing:** `src/game/rendering/Sprites.ts` draws them on the 2D overlay:
+  * Sorted by screen depth, sized to about 2.3 m (never below 20 px).
+  * A figure behind a building is drawn faded.
+  * Bloater, brute, screamer and mutant are tinted and scaled walkers; turned soldiers are the soldier
+    art tinted green.
+* **Fallback:** if a sheet fails to load, the game draws the 3D figures for what it covered.
+
+To swap in different sheets, keep the clip names, edit the cell picks in the slicer, run it, and rebuild.
 
 ## Units, infected, vehicles, defences (`src/game/rendering/Models.ts`)
 

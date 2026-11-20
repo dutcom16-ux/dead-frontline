@@ -21,7 +21,7 @@ export interface UnitDef {
 }
 export interface ZombieDef {
   name: string; hp: number; armor: number; speed: number; run: number; attack: [number, number]; sight: number; hearing: number;
-  size: number; weight: number; color: C3; lowProfile?: number; doorBreaker?: number; knockback?: number;
+  size: number; weight: number; color: C3; lowProfile?: number; doorBreaker?: number; knockback?: number; infect?: number;
   explode?: { radius: number; damage: number }; scream?: { radius: number; cooldown: number }; leap?: number; slam?: { radius: number }; boss?: boolean;
 }
 export interface StructureDef {

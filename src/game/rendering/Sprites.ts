@@ -1,90 +1,162 @@
-// Troop sprites from the supplied sprite sheet (public/sprites/troops.png + .json, sliced by
-// tools/slice_sprites.py). The sheet has front-facing and right-facing art; left is the mirror of
-// right. There is no back view, so soldiers moving away from the camera use the side view.
-// Sprites are drawn on the 2D overlay, sorted by depth; soldiers hidden behind buildings are
-// drawn faded so they stay visible.
+// Soldiers, infected, corpses and combat effects drawn from the supplied sprite sheets
+// (public/sprites/troops.* and zombies.*, cut by tools/slice_sprites.py).
+//
+// Facing: each figure's map heading is turned into one of eight screen directions. The sheets
+// have front (S), three-quarter front (SE), side (E) and back (N) views; the west-facing
+// directions are those views mirrored, and NE/NW use the back view when standing. There is no walking cycle from behind, so a soldier walking
+// away from the camera uses the two back frames with a step bob, and NE/NW movement uses the side
+// cycle.
+//
+// Sprites are drawn on the 2D overlay sorted by screen depth. A figure behind a building is drawn
+// faded so it stays visible. If the sheets fail to load the game keeps its 3D figures.
 import type { Game } from "../Game";
 import type { IsoCamera } from "../camera/IsoCamera";
 import type { Battlefield } from "../Battlefield";
-import { Unit, Civilian, Corpse } from "../entities";
+import { Unit, Zombie, Civilian, Corpse } from "../entities";
+import { squadOf, OMNI } from "../units/Squads";
 
-interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number }
-interface Atlas { size: [number, number]; frames: Frame[]; anims: Record<string, number[]> }
+interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; k?: number; mx?: number; my?: number }
+interface Atlas { size: [number, number]; ref: number; frames: Frame[]; anims: Record<string, number[]> }
+interface Sheet { img: HTMLImageElement; atlas: Atlas; tints: Map<string, HTMLCanvasElement> }
+type Dir = "E" | "NE" | "N" | "S" | "SE";
 
-const REF_H = 62;          // source pixel height of a standing soldier
-const TROOP_M = 1.85 * 1.3; // drawn a little larger than life for readability
-const MOVING_RUN: Record<string, boolean> = { move: true, retreat: true, follow: true, interact: true, board: true };
+const HUMAN_M = 1.8 * 1.3;   // figures are drawn a little larger than life so they read at RTS zoom
+const TINTS: Record<string, string> = { bloater: "rgba(150,175,40,0.42)", brute: "rgba(30,18,12,0.38)", screamer: "rgba(235,215,225,0.30)", mutant: "rgba(150,25,20,0.36)", turned: "rgba(105,135,55,0.48)" };
+const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 
 export class Sprites {
-  img: HTMLImageElement | null = null;
-  atlas: Atlas | null = null;
-  ready = false;
+  troops: Sheet | null = null; zombies: Sheet | null = null;
+  ready = false; zready = false;
   flip = new Map<number, boolean>();
   occl = new Map<number, { t: number; v: boolean }>();
-  async load(base = "sprites/troops") {
-    try {
-      const [meta, img] = await Promise.all([
-        fetch(base + ".json").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
-        new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = base + ".png"; }),
-      ]);
-      this.atlas = meta; this.img = img; this.ready = true;
-    } catch (e) { this.ready = false; /* fall back to the 3D soldier models */ }
+  async load(base = "sprites/") {
+    const get = async (name: string): Promise<Sheet | null> => {
+      try {
+        const [atlas, img] = await Promise.all([
+          fetch(base + name + ".json").then((r) => { if (!r.ok) throw new Error(String(r.status)); return r.json(); }),
+          new Promise<HTMLImageElement>((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = base + name + ".png"; }),
+        ]);
+        return { img, atlas, tints: new Map() };
+      } catch (e) { return null; }
+    };
+    [this.troops, this.zombies] = await Promise.all([get("troops"), get("zombies")]);
+    this.ready = !!this.troops; this.zready = !!this.zombies;
   }
-  /** true for units the sprite sheet draws (all infantry) */
   covers(u: Unit) { return this.ready && !u.vehicle; }
-
-  private frame(anim: string, i: number): Frame | null {
-    const a = this.atlas!, ids = a.anims[anim];
-    if (!ids || !ids.length) return null;
-    return a.frames[ids[((i % ids.length) + ids.length) % ids.length]];
+  coversZombie(z: Zombie) { return z.soldier ? this.ready : this.zready && z.type !== "abomination"; }
+  coversCorpse(c: Corpse) {
+    if (c.model === "abomination") return false;
+    if (c.sprite || c.kind === "soldier" || c.soldier) return this.ready;
+    return this.zready && !!c.kind;
   }
-  private blit(ctx: CanvasRenderingContext2D, f: Frame, sx: number, sy: number, scale: number, flip: boolean) {
-    const w = f.w * scale, h = f.h * scale;
+
+  /** a copy of a sheet with a colour wash (made once, on first use) */
+  private tinted(sh: Sheet, key: string): CanvasImageSource {
+    let c = sh.tints.get(key);
+    if (!c) {
+      c = document.createElement("canvas"); c.width = sh.img.width; c.height = sh.img.height;
+      const x = c.getContext("2d")!;
+      x.drawImage(sh.img, 0, 0);
+      x.globalCompositeOperation = "source-atop"; x.fillStyle = TINTS[key]; x.fillRect(0, 0, c.width, c.height);
+      sh.tints.set(key, c);
+    }
+    return c;
+  }
+  private frame(sh: Sheet, anim: string, i: number): Frame | null {
+    const ids = sh.atlas.anims[anim];
+    if (!ids || !ids.length) return null;
+    return sh.atlas.frames[ids[((Math.floor(i) % ids.length) + ids.length) % ids.length]];
+  }
+  /** draw a frame with its feet at (sx, sy); `h` = figure height in screen px */
+  private blit(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sh: Sheet, f: Frame, sx: number, sy: number, h: number, flip: boolean, wide = 1) {
+    const k = (h / sh.atlas.ref) * (f.k || 1), kx = k * wide;
+    const w = f.w * kx, hh = f.h * k;
     if (flip) {
       ctx.save(); ctx.translate(sx, 0); ctx.scale(-1, 1);
-      ctx.drawImage(this.img!, f.x, f.y, f.w, f.h, -f.ax * scale, sy - f.ay * scale, w, h);
+      ctx.drawImage(src, f.x, f.y, f.w, f.h, -f.ax * kx, sy - f.ay * k, w, hh);
       ctx.restore();
-    } else ctx.drawImage(this.img!, f.x, f.y, f.w, f.h, sx - f.ax * scale, sy - f.ay * scale, w, h);
+    } else ctx.drawImage(src, f.x, f.y, f.w, f.h, sx - f.ax * kx, sy - f.ay * k, w, hh);
   }
 
-  /** screen-space facing of a map heading: x>0 = screen right, y>0 = up-screen (away from the viewer) */
+  /** screen-space direction of a map heading: x>0 screen-right, y>0 up-screen (away from the viewer) */
   facing(cam: IsoCamera, heading: number): [number, number] {
     const fx = Math.cos(heading), fy = Math.sin(heading);
     const [rx, ry] = cam.right, [ux, uy] = cam.forward;
     return [fx * rx + fy * ry, fx * ux + fy * uy];
   }
-  /** pose and frame for a soldier from what it is doing */
-  pose(g: Game, u: Unit, cam: IsoCamera, now: number): { anim: string; i: number; flip: boolean } {
-    const [sx, sy] = this.facing(cam, u.heading);
-    let flip = this.flip.get(u.id) ?? sx < 0;
-    if (Math.abs(sx) > 0.2) flip = sx < 0;
-    this.flip.set(u.id, flip);
+  /** eight screen directions folded onto the five drawn ones (west = mirrored east) */
+  dir(cam: IsoCamera, heading: number, id: number): { d: Dir; flip: boolean } {
+    const [sx, sy] = this.facing(cam, heading);
+    const sector = ((Math.round(Math.atan2(sy, sx) / (Math.PI / 4)) % 8) + 8) % 8; // 0 E, 1 NE, 2 N, 3 NW, 4 W, 5 SW, 6 S, 7 SE
+    let flip = sx < -0.05 ? true : sx > 0.05 ? false : this.flip.get(id) ?? false;
+    this.flip.set(id, flip);
+    const d: Dir = sector === 0 || sector === 4 ? "E" : sector === 1 || sector === 3 ? "NE" : sector === 2 ? "N" : sector === 6 ? "S" : "SE";
+    return { d, flip };
+  }
+
+  /** soldier pose: what he is doing and which way he faces */
+  pose(g: Game, u: Unit, cam: IsoCamera, now: number): { anim: string; i: number; flip: boolean; bob: number; muzzle: boolean } {
     const ph = (u.id % 7) * 0.37;
+    const tgt = g.get(u.target);
+    const engaging = !!tgt && !tgt.dead && u.losOk && (u.mag > 0 || u.reserve > 0);
+    const head = engaging ? Math.atan2(tgt.y - u.y, tgt.x - u.x) : u.heading;
+    const { d, flip } = this.dir(cam, head, u.id);
+    const out = (anim: string, i: number, bob = 0, muzzle = false) => ({ anim, i, flip, bob, muzzle });
     if (u.reloadT > 0 && u.weapon) {
       const p = 1 - u.reloadT / Math.max(0.1, u.weapon.reload);
-      return { anim: "reload_front", i: Math.floor(Math.max(0, Math.min(0.999, p)) * 6), flip };
+      return out("reload_S", Math.max(0, Math.min(0.999, p)) * 6);
     }
-    if (u.hitT > 0.05 && !u.moving) return { anim: "hurt_front", i: Math.floor((0.15 - u.hitT) * 30), flip };
-    const tgt = g.get(u.target);
-    if (tgt && !tgt.dead && u.losOk && (u.mag > 0 || u.reserve > 0)) {
-      // aim at the target: side view toward it
-      const [tx] = this.facing(cam, Math.atan2(tgt.y - u.y, tgt.x - u.x));
-      const f = Math.abs(tx) > 0.05 ? tx < 0 : flip;
-      this.flip.set(u.id, f);
-      if (u.moving) return { anim: "walk_side", i: Math.floor((now + ph) * 9), flip: f };
-      if (u.flashT > 0) return { anim: "fire_side", i: Math.floor(now * 30), flip: f };
-      return { anim: "aim_side", i: Math.floor((now + ph) * 2), flip: f };
-    }
+    const walkBob = (fps: number) => Math.abs(Math.sin((now + ph) * fps * 0.5 * Math.PI)) * 2;
     if (u.moving) {
-      const run = MOVING_RUN[u.order.kind] || u.speedNow > 3.9;
-      const side = Math.abs(sx) > 0.42 || sy > 0; // moving away: no back view, use the side view
-      const anim = (run ? "run_" : "walk_") + (side ? "side" : "front");
-      return { anim, i: Math.floor((now + ph) * (run ? 11 : 8)), flip };
+      const run = u.speedNow > 3.0 || u.order.kind === "retreat";
+      if (d === "N") return out("back_N", (now + ph) * 4, walkBob(run ? 6 : 4));
+      if (engaging && (d === "E" || d === "NE")) return out("advance_E", (now + ph) * 8, 0, u.flashT > 0);
+      if (d === "S") return out("walk_S", (now + ph) * (run ? 13 : 9));
+      if (d === "SE") return out(run ? (u.id % 2 ? "run_SE2" : "run_SE") : u.id % 2 ? "walk_SE2" : "walk_SE", (now + ph) * (run ? 11 : 9));
+      return out(run ? "run_E" : "walk_E", (now + ph) * (run ? 11 : 8));
     }
-    if (u.order.kind === "hold" || u.order.kind === "defend") return { anim: "crouch_front", i: Math.floor((now + ph) * 3), flip };
-    return { anim: "idle_front", i: Math.floor((now + ph) * 5), flip };
+    // standing: kneel in line, box, circle and defensive positions and when holding
+    const sq = u.order.kind === "formation" ? squadOf(g, u) : null;
+    const kneel = u.order.kind === "hold" || u.order.kind === "defend" || (!!sq && sq.halted && KNEEL.has(sq.formation));
+    if (engaging) {
+      if (d === "N") return out("back_N", 0, 0, u.flashT > 0);
+      if (d === "E" || d === "NE") return kneel ? out("kneel_E", 0, 0, u.flashT > 0) : out("advance_E", u.id % 3, 0, u.flashT > 0);
+      return out("aim_SE", u.id % 3, 0, u.flashT > 0);
+    }
+    if (d === "N" || d === "NE") return out("back_N", u.id % 2);
+    if (kneel) return d === "E" ? out("kneel_E", 0) : out("crouch_S", (now + ph) * 2);
+    if (d === "E") return out("advance_E", 0);
+    return out(u.id % 2 ? "idle_S2" : "idle_S", (now + ph) * 4);
   }
-  /** a building between the soldier and the camera? (cached ~4 times a second) */
+  /** infected pose */
+  zpose(g: Game, z: Zombie, cam: IsoCamera, now: number): { anim: string; i: number; flip: boolean; bob: number } {
+    const ph = (z.id % 11) * 0.29;
+    const t = g.get(z.target);
+    const head = z.state === "attack" && t ? Math.atan2(t.y - z.y, t.x - z.x) : z.heading;
+    const { d, flip } = this.dir(cam, head, z.id);
+    const out = (anim: string, i: number, bob = 0) => ({ anim, i, flip, bob });
+    const moving = Math.hypot(z.x - z.lastX, z.y - z.lastY) > 0.02 || z.state === "chase" || z.state === "investigate" || z.state === "wander";
+    if (z.soldier) {
+      // a turned soldier: his own uniform, a slow shamble
+      if (z.state === "attack") return out(d === "N" ? "back_N" : "advance_E", (now + ph) * 3);
+      if (d === "N") return out("back_N", (now + ph) * 2.5, Math.abs(Math.sin((now + ph) * 4)) * 2);
+      return out(d === "S" ? "walk_S" : d === "SE" ? "walk_SE" : "walk_E", (now + ph) * 5.5);
+    }
+    if (z.type === "crawler") return out(z.state === "attack" ? "crawl_E" : "crawl_E", moving ? (now + ph) * 6 : 0);
+    if (z.state === "attack") return out("attack_E", (now + ph) * 9);
+    if (z.state === "idle" || !moving) {
+      if (d === "N") return out("back_N", z.id % 2);
+      return out(z.id % 2 ? "idle_S2" : "idle_S", (now + ph) * 3);
+    }
+    const fast = z.state === "chase" && z.def.run > 3;
+    if (d === "N") return out("back_N", (now + ph) * (fast ? 6 : 3), Math.abs(Math.sin((now + ph) * (fast ? 9 : 5))) * 2);
+    if (d === "S" || d === "SE") return out(["walk_S", "walk_S2", "walk_S3"][z.id % 3], (now + ph) * (fast ? 14 : z.state === "chase" ? 9 : 6));
+    if (z.type === "mutant" && z.state === "chase") return out("charge_E", (now + ph) * 12);
+    if (fast) return out(["run_E", "run_E2", "run_E3"][z.id % 3], (now + ph) * 12);
+    return out(z.id % 2 ? "hunch_E" : "walk_E", (now + ph) * (z.state === "chase" ? 8 : 5));
+  }
+
+  /** a building between the figure and the camera? (cached about four times a second) */
   occluded(bf: Battlefield, cam: IsoCamera, id: number, x: number, y: number, z: number, now: number) {
     const c = this.occl.get(id);
     if (c && now - c.t < 0.25) return c.v;
@@ -99,53 +171,83 @@ export class Sprites {
     return v;
   }
 
-  /** draw corpses, soldiers and combat effects on the overlay (before health bars and labels) */
+  /** draw corpses, soldiers, infected and combat effects on the overlay (before health bars and labels) */
   draw(ctx: CanvasRenderingContext2D, g: Game, bf: Battlefield, cam: IsoCamera, W: number, H: number, now: number) {
-    if (!this.ready) return;
+    if (!this.ready && !this.zready) return;
     const ppm = H / (2 * cam.zoom);
-    const scale = Math.max(18 / REF_H, (ppm * TROOP_M) / REF_H);
+    const human = Math.max(20, ppm * HUMAN_M);
     const on = (s: [number, number] | null, pad = 80) => !!s && s[0] > -pad && s[1] > -pad && s[0] < W + pad && s[1] < H + pad;
-    ctx.imageSmoothingEnabled = scale < 1.6;
-    // ---- fallen soldiers: death animation, then they stay down
-    for (const c of g.corpses as (Corpse & { sprite?: boolean; flip?: boolean })[]) {
-      if (!c.sprite) continue;
+    ctx.imageSmoothingEnabled = human < 90;
+    const T = this.troops, Z = this.zombies;
+    // ---- bodies (piles stack because each corpse lies on top of the ones already there)
+    const bodies: { y: number; d: () => void }[] = [];
+    for (const c of g.corpses) {
+      if (!this.coversCorpse(c)) continue;
       const s = bf.screen(c.x, c.y, c.z);
       if (!on(s)) continue;
-      const f = this.frame("die_front", Math.min(6, Math.floor((g.time - c.t) * 9)));
-      if (!f) continue;
-      ctx.globalAlpha = 0.9;
-      this.blit(ctx, f, s![0], s![1], scale, !!c.flip);
+      if (c.sprite || c.kind === "soldier" || c.soldier) {
+        const f = this.frame(T!, "die_E", Math.min(5, (g.time - c.t) * 9));
+        if (f) bodies.push({ y: s![1], d: () => this.blit(ctx, c.soldier ? this.tinted(T!, "turned") : T!.img, T!, f, s![0], s![1], human, !!c.flip) });
+      } else {
+        const f = this.frame(Z!, c.kind === "crawler" ? "crawl_E" : "dead", c.kind === "crawler" ? 3 : (c.id || 0) % 3);
+        const tint = TINTS[c.kind || ""] ? this.tinted(Z!, c.kind!) : Z!.img;
+        if (f) bodies.push({ y: s![1], d: () => this.blit(ctx, tint, Z!, f, s![0], s![1], human * Math.min(1.5, c.s || 1), !!c.flip, c.kind === "bloater" ? 1.2 : 1) });
+      }
     }
+    bodies.sort((a, b) => a.y - b.y);
+    ctx.globalAlpha = 0.92;
+    for (const b of bodies) b.d();
     ctx.globalAlpha = 1;
-    // ---- soldiers (and soldiers among the survivors), back to front
-    const list: { s: [number, number]; d: () => void }[] = [];
-    for (const u of g.units) {
+    // ---- standing figures, back to front
+    const list: { y: number; d: () => void }[] = [];
+    if (T) for (const u of g.units) {
       if (!u.alive || u.vehicle || u.inVehicle !== null) continue;
       const s = bf.screen(u.x, u.y, u.z);
       if (!on(s)) continue;
       const p = this.pose(g, u, cam, now);
-      const f = this.frame(p.anim, p.i);
+      const f = this.frame(T, p.anim, p.i);
       if (!f) continue;
       const occ = this.occluded(bf, cam, u.id, u.x, u.y, u.z, now);
-      list.push({ s: s!, d: () => {
+      list.push({ y: s![1], d: () => {
         ctx.globalAlpha = occ ? 0.45 : 1;
         if (u.hitT > 0) ctx.filter = "brightness(1.8)";
-        this.blit(ctx, f, s![0], s![1], scale, p.flip);
+        const sy = s![1] - p.bob;
+        this.blit(ctx, T.img, T, f, s![0], sy, human, p.flip);
         ctx.filter = "none";
+        if (p.muzzle) this.muzzle(ctx, T, f, s![0], sy, human, p.flip, now);
       } });
     }
-    for (const c of g.civs as Civilian[]) {
+    if (T) for (const c of g.civs as Civilian[]) {
       if (!c.military || c.dead || c.state === "gone") continue;
       const s = bf.screen(c.x, c.y, c.z);
       if (!on(s)) continue;
-      const f = this.frame("crouch_front", Math.floor(now * 3 + c.id));
-      if (f) list.push({ s: s!, d: () => { ctx.globalAlpha = 0.85; this.blit(ctx, f, s![0], s![1], scale, false); } });
+      const f = this.frame(T, c.state === "hiding" ? "crouch_S" : "idle_S", now * 3 + c.id);
+      if (f) list.push({ y: s![1], d: () => { ctx.globalAlpha = 0.85; this.blit(ctx, T.img, T, f, s![0], s![1], human, false); } });
     }
-    list.sort((a, b) => a.s[1] - b.s[1]);
+    for (const z of g.zombies) {
+      if (z.dead || !this.coversZombie(z)) continue;
+      const s = bf.screen(z.x, z.y, z.z);
+      if (!on(s)) continue;
+      const p = this.zpose(g, z, cam, now);
+      const sh = z.soldier ? T! : Z!;
+      const f = this.frame(sh, p.anim, p.i);
+      if (!f) continue;
+      const src = z.soldier ? this.tinted(T!, "turned") : TINTS[z.type] ? this.tinted(Z!, z.type) : Z!.img;
+      const size = z.soldier ? 1 : Math.min(1.6, z.def.size);
+      const occ = this.occluded(bf, cam, z.id, z.x, z.y, z.z, now);
+      list.push({ y: s![1], d: () => {
+        ctx.globalAlpha = occ ? 0.4 : 1;
+        if (z.hitT > 0) ctx.filter = "brightness(1.7)";
+        else if (z.burnT > 0) ctx.filter = "sepia(1) saturate(3) hue-rotate(-20deg)";
+        this.blit(ctx, src, sh, f, s![0], s![1] - p.bob, human * size * (z.type === "crawler" ? 1.15 : 1), p.flip, z.type === "bloater" ? 1.25 : 1);
+        ctx.filter = "none";
+      } });
+    }
+    list.sort((a, b) => a.y - b.y);
     for (const it of list) it.d();
     ctx.globalAlpha = 1;
     // ---- combat effects from the sheet
-    for (const e of g.effects) {
+    if (T) for (const e of g.effects) {
       let anim = "", size = 0, comp: GlobalCompositeOperation = "source-over", alpha = 1;
       const fr = e.t / e.life;
       if (e.kind === "blast") { anim = "explosion"; size = e.s * 2.6; }
@@ -153,16 +255,70 @@ export class Sprites {
       else if (e.kind === "hit") { anim = "bloodhit"; size = 1.4; }
       else if (e.kind === "spark") { anim = "sparks"; size = 1.1; comp = "lighter"; }
       else continue;
-      const ids = this.atlas!.anims[anim];
+      const ids = T.atlas.anims[anim];
       if (!ids) continue;
-      const f = this.atlas!.frames[ids[Math.min(ids.length - 1, Math.floor(fr * ids.length))]];
+      const f = T.atlas.frames[ids[Math.min(ids.length - 1, Math.floor(fr * ids.length))]];
       const s = bf.screen(e.x, e.y, e.z + (e.kind === "smoke" ? fr * 4 : 0));
       if (!on(s, 200)) continue;
       const k = Math.max(12, size * ppm) / Math.max(f.w, f.h);
       ctx.globalAlpha = alpha; ctx.globalCompositeOperation = comp;
-      ctx.drawImage(this.img!, f.x, f.y, f.w, f.h, s![0] - (f.w * k) / 2, s![1] - (f.h * k) / 2, f.w * k, f.h * k);
+      ctx.drawImage(T.img, f.x, f.y, f.w, f.h, s![0] - (f.w * k) / 2, s![1] - (f.h * k) / 2, f.w * k, f.h * k);
     }
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
+  }
+  /** muzzle flash at the rifle tip of an aiming frame */
+  private muzzle(ctx: CanvasRenderingContext2D, T: Sheet, f: Frame, sx: number, sy: number, h: number, flip: boolean, now: number) {
+    const m = this.frame(T, "muzzle", now * 30);
+    if (!m) return;
+    const k = (h / T.atlas.ref) * (f.k || 1);
+    let mx: number, my: number;
+    if (f.mx !== undefined && f.my !== undefined) { mx = (f.mx - f.ax) * k; my = (f.my - f.ay) * k; }
+    else { mx = 0; my = -h * 0.75; }   // back view: flash above the shoulder
+    const x = sx + (flip ? -mx : mx), y = sy + my, size = h * 0.32;
+    const kk = size / Math.max(m.w, m.h);
+    ctx.globalCompositeOperation = "lighter";
+    ctx.drawImage(T.img, m.x, m.y, m.w, m.h, x - (m.w * kk) / 2, y - (m.h * kk) / 2, m.w * kk, m.h * kk);
+    ctx.globalCompositeOperation = "source-over";
+  }
+  /** formation guides for selected squads, infection and leader markers */
+  overlay(ctx: CanvasRenderingContext2D, g: Game, bf: Battlefield, W: number, H: number, now: number, part: "ground" | "labels") {
+    if (part === "ground") for (const sq of g.squads) {
+      const L = g.get(sq.acting) as Unit | null;
+      if (!L) continue;
+      const members = sq.members.map((id) => g.get(id) as Unit).filter((u) => u && u.alive && u.inVehicle === null && !u.detached);
+      if (!members.some((u) => u.selected)) continue;
+      ctx.strokeStyle = sq.broken > 0 ? "rgba(255,120,100,.7)" : "rgba(140,255,150,.55)"; ctx.lineWidth = 1.2;
+      for (const u of members) {
+        if (isNaN(u.slotX) || (u === L && !sq.halted)) continue;
+        const s = bf.screen(u.slotX, u.slotY, bf.h(u.slotX, u.slotY));
+        if (!s || s[0] < -20 || s[1] < -20 || s[0] > W + 20 || s[1] > H + 20) continue;
+        ctx.beginPath(); ctx.ellipse(s[0], s[1], 7, 3.5, 0, 0, Math.PI * 2); ctx.stroke();
+        // facing tick
+        const t = bf.screen(u.slotX + Math.cos(u.slotFace) * 1.2, u.slotY + Math.sin(u.slotFace) * 1.2, bf.h(u.slotX, u.slotY));
+        if (t) { ctx.beginPath(); ctx.moveTo(s[0], s[1]); ctx.lineTo(t[0], t[1]); ctx.stroke(); }
+      }
+      // formation front arrow from the centre
+      const ox = sq.halted ? sq.cx : L.x, oy = sq.halted ? sq.cy : L.y;
+      if (!OMNI.has(sq.formation)) {
+        const a = bf.screen(ox, oy, bf.h(ox, oy)), b = bf.screen(ox + Math.cos(sq.facing) * 4, oy + Math.sin(sq.facing) * 4, bf.h(ox, oy));
+        if (a && b) { ctx.strokeStyle = "rgba(255,230,120,.75)"; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(a[0], a[1]); ctx.lineTo(b[0], b[1]); ctx.stroke(); }
+      }
+    }
+    if (part !== "labels") return;
+    ctx.textAlign = "center";
+    for (const u of g.units) {
+      if (!u.alive || u.vehicle || u.inVehicle !== null) continue;
+      const lead = g.squads.some((q) => q.leader === u.id && q.members.length > 1);
+      if (!lead && u.infectedAt < 0) continue;
+      const s = bf.screen(u.x, u.y, u.z + 3.3);
+      if (!s || s[0] < 0 || s[1] < 0 || s[0] > W || s[1] > H) continue;
+      if (u.infectedAt >= 0) {
+        const left = Math.max(0, Math.ceil(u.turnAt - g.time));
+        ctx.font = "bold 11px system-ui"; ctx.fillStyle = left < 8 && Math.floor(now * 4) % 2 ? "#ff6a4a" : "#c6f05a";
+        ctx.fillText(`☣ ${left}s`, s[0], s[1] - 10);
+      }
+      if (lead) { ctx.font = "bold 12px system-ui"; ctx.fillStyle = "#ffd65a"; ctx.fillText("★", s[0], s[1] - (u.infectedAt >= 0 ? 22 : 10)); }
+    }
   }
 }
 export { Unit };

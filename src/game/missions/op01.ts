@@ -2,6 +2,8 @@
 // map package: OSM landmarks (city hall, market, hospital, port, power plant, plaza), named OSM roads
 // and junctions (Naga–Toledo Road, Antonio Y. de Pio Highway, Diosdado Macapagal Highway, Rafols St).
 import type { Game } from "../Game";
+import type { Unit } from "../entities";
+import { createSquad } from "../units/Squads";
 import { Mission, Objective } from "./Mission";
 import { OP01 } from "../data";
 import { dist } from "../core";
@@ -98,11 +100,14 @@ export function buildOp01(g: Game, spawn = true): Mission {
   }
   // the squad lands at the LZ
   const dir = Math.atan2(ALPHA[1] - LZ[1], ALPHA[0] - LZ[0]);
+  const squad: Unit[] = [];
   (OP01.squad as string[]).forEach((t, i) => {
     const row = Math.floor(i / 3), col = (i % 3) - 1;
     const x = LZ[0] - Math.cos(dir) * row * 3 + Math.sin(dir) * col * 3, y = LZ[1] - Math.sin(dir) * row * 3 - Math.cos(dir) * col * 3;
     const u = g.addUnit(t, x, y); u.heading = dir;
+    squad.push(u);
   });
+  createSquad(g, squad, "Alpha", "wedge");
   return m;
 }
 

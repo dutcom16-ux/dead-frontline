@@ -5,12 +5,12 @@ let NEXT_ID = 1;
 export const nextId = () => NEXT_ID++;
 export const setNextId = (n: number) => { NEXT_ID = Math.max(NEXT_ID, n); };
 
-export type OrderKind = "idle" | "move" | "attackMove" | "attack" | "hold" | "defend" | "patrol" | "follow" | "retreat" | "interact" | "board" | "build" | "clear";
+export type OrderKind = "idle" | "move" | "attackMove" | "attack" | "hold" | "defend" | "patrol" | "follow" | "retreat" | "interact" | "board" | "build" | "clear" | "formation";
 export interface Order {
   kind: OrderKind; x?: number; y?: number; target?: number; ax?: number; ay?: number; bx?: number; by?: number; leg?: number;
   item?: string; rot?: number; t?: number;
 }
-export type Formation = "line" | "column" | "wedge" | "spread";
+export type Formation = "line" | "column" | "wedge" | "spread" | "box" | "circle" | "defensive";
 
 export class Unit {
   id = nextId(); type: string; def: UnitDef; vehicle: boolean; name: string;
@@ -26,6 +26,13 @@ export class Unit {
   burn = 0; flashT = 0; aimX = 0; aimY = 0; hitT = 0;
   defendAt: [number, number] | null = null;
   rank = 0;
+  // squad and formation (see units/Squads.ts)
+  squad = 0; detached = false; task = false;
+  slotX = NaN; slotY = NaN; slotFace = NaN; rawX = NaN; rawY = NaN; slotT = -99;
+  formT = -99; formClear = true; formClearT = -99; formStuckT = 0; formLastX = 0; formLastY = 0;
+  speedCap = Infinity; squadHalt = false;
+  // infection: bitten soldiers turn after incubation (see zombies/Infection.ts)
+  infectedAt = -1; turnAt = -1;
   constructor(type: string, x: number, y: number, name?: string) {
     this.type = type; this.def = unitDef(type); this.vehicle = isVehicleType(type);
     this.x = this.lastX = x; this.y = this.lastY = y;
@@ -48,6 +55,9 @@ export class Zombie {
   lastSeenX = 0; lastSeenY = 0; lastSeenT = -99; senseT = Math.random() * 0.5; attackT = 0; stuckT = 0; lastX = 0; lastY = 0;
   homeX: number; homeY: number; wanderT = Math.random() * 6; burn = 0; burnT = 0; stagger = 0; screamT = 0; leapT = 0;
   dead = false; awake = false; zone = ""; nest = 0; hitT = 0; breakT = 0;
+  climbT = 0;                       // climbing over a defence on a corpse pile
+  soldier: string | null = null;    // a soldier who turned: his unit type (drawn in uniform)
+  formerSquad = 0;
   constructor(type: string, x: number, y: number) {
     this.type = type; this.def = ZOMBIES[type];
     this.x = this.lastX = this.homeX = x; this.y = this.lastY = this.homeY = y;
@@ -123,7 +133,7 @@ export class Crate {
 
 export interface Projectile { x: number; y: number; z: number; tx: number; ty: number; tz: number; speed: number; radius: number; damage: number; owner: number; kind: string; t: number }
 export interface Effect { kind: string; x: number; y: number; z: number; t: number; life: number; s: number; rot?: number; col?: [number, number, number]; x2?: number; y2?: number; z2?: number }
-export interface Corpse { x: number; y: number; z: number; rot: number; col: [number, number, number]; s: number; t: number; model: string; sprite?: boolean; flip?: boolean }
+export interface Corpse { x: number; y: number; z: number; rot: number; col: [number, number, number]; s: number; t: number; model: string; sprite?: boolean; flip?: boolean; pk?: number; w?: number; kind?: string; id?: number; soldier?: string }
 export interface Fire { x: number; y: number; r: number; t: number; dps: number }
 export interface Noise { x: number; y: number; r: number; t: number }
 /** transport visuals (helicopters, convoy trucks): fly or drive in, deliver, leave */

@@ -1,6 +1,7 @@
 // Military logistics — the only economy in the game (no gathering): limited stock per mission,
 // delivery times, cooldowns and restrictions (FOB, communications, motor pool, campaign phase).
 import type { Game } from "../Game";
+import { createSquad, ensureSquads } from "../units/Squads";
 import { SUPPLIES, SupplyDef } from "../data";
 import { Transport } from "../entities";
 import { dist } from "../core";
@@ -157,7 +158,11 @@ export class Logistics {
     if (d.units) {
       const made = d.units.map((type, k) => g.addUnit(type, p.x + (k % 3) * 2 - 2, p.y + Math.floor(k / 3) * 2));
       g.stats.reinforcements += made.length;
-      g.radio(`Reinforcements on the ground: ${made.map((u) => u.name).join(", ")}.`, "good");
+      // a team arrives as its own squad
+      const inf = made.filter((u) => !u.vehicle);
+      const sq = inf.length >= 2 ? createSquad(g, inf) : null;
+      if (!sq) ensureSquads(g);
+      g.radio(`Reinforcements on the ground${sq ? ` as squad ${sq.name}` : ""}: ${made.map((u) => u.name).join(", ")}.`, "good");
       g.onEvent("reinforced", made);
     }
     if (d.vehicle) { const gp = g.fob.site ? g.fob.gate() : [p.x, p.y]; const v = g.addUnit(d.vehicle, gp[0], gp[1]); g.radio(`${v.name} delivered to the motor pool.`, "good"); g.onEvent("reinforced", [v]); }

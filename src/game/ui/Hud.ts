@@ -5,19 +5,21 @@ import type { Controls } from "../input/Controls";
 import type { RadioMsg } from "../Game";
 import { Unit } from "../entities";
 import { issue } from "../units/UnitAI";
+import { squadOf, liveMembers, FORMATIONS, FORMATION_LABEL, FORMATION_ICON, OMNI } from "../units/Squads";
 import { SUPPLIES, STRUCTURES, WEAPONS } from "../data";
 import { fmtTime, escHtml as E, dist } from "../core";
 
 const $ = (id: string) => document.getElementById(id)!;
 const ABBR: Record<string, string> = { rifleman: "RF", assault: "AS", sniper: "SN", machine_gunner: "MG", shotgunner: "SG", flamethrower: "FL", rocket: "RL", medic: "MD", engineer: "EN", special_forces: "SF",
   jeep: "JEEP", apc: "APC", ifv: "IFV", tank: "MBT", truck: "TRK", arv: "ARV" };
-const ORDER_LABEL: Record<string, string> = { idle: "Idle", move: "Moving", attackMove: "Attack-move", attack: "Attacking", hold: "Holding position", defend: "Defending", patrol: "Patrolling", follow: "Following", retreat: "Retreating", interact: "Interacting", board: "Boarding", build: "Building", clear: "Clearing wreck" };
+const ORDER_LABEL: Record<string, string> = { idle: "Idle", move: "Moving", attackMove: "Attack-move", attack: "Attacking", hold: "Holding position", defend: "Defending", patrol: "Patrolling", follow: "Following", retreat: "Retreating", interact: "Interacting", board: "Boarding", build: "Building", clear: "Clearing wreck", formation: "In formation" };
 
 export class Hud {
-  s: Session; c: Controls; t = 0; panel: "" | "logistics" | "fob" | "build" = ""; sig = ""; selSig = ""; cmdSig = ""; panelSig = ""; toastT: any = 0;
+  s: Session; c: Controls; t = 0; panel: "" | "logistics" | "fob" | "build" = ""; sig = ""; selSig = ""; cmdSig = ""; panelSig = ""; sqSig = ""; toastT: any = 0;
   mmBase: HTMLCanvasElement | null = null; mm: HTMLCanvasElement; mmCtx: CanvasRenderingContext2D; mmT = 0;
   onPause: () => void = () => {};
   showFps = false;
+  lastSq = { id: 0, t: 0 };
   constructor(s: Session, c: Controls) {
     this.s = s; this.c = c;
     this.mm = $("minimap") as HTMLCanvasElement; this.mmCtx = this.mm.getContext("2d")!;
@@ -33,6 +35,13 @@ export class Hud {
     $("tRotR").onclick = () => this.s.cam.rotate(1);
     $("tAll").onclick = () => { for (const u of this.s.game!.units) u.selected = u.alive && u.inVehicle === null; this.selSig = ""; };
     $("commands").onclick = (e) => { const b = (e.target as HTMLElement).closest("button"); if (b) this.cmd(b.dataset.c!); };
+    $("squadbar").onclick = (e) => {
+      const b = (e.target as HTMLElement).closest("button") as HTMLButtonElement; if (!b) return;
+      const q = this.s.game!.squads.find((x) => x.id === +b.dataset.sq!); if (!q) return;
+      const now = performance.now();
+      if (this.lastSq.id === q.id && now - this.lastSq.t < 400) this.c.centerOnSelection(); else this.c.selectSquad(q);
+      this.lastSq = { id: q.id, t: now }; this.selSig = this.sqSig = "";
+    };
     $("selection").onclick = (e) => { const b = (e.target as HTMLElement).closest("[data-id]") as HTMLElement; if (!b) return; const id = +b.dataset.id!; for (const u of this.s.game!.units) u.selected = u.id === id; this.selSig = ""; };
     $("panelBody").onclick = (e) => this.panelClick(e);
     this.minimapInput();
@@ -45,7 +54,7 @@ export class Hud {
     for (const m of g.radioLog.slice(-6)) this.radio(m);
     g.onRadio = (m) => this.radio(m);
     $("mname").textContent = "Mission 01 · Retake Toledo City";
-    this.sig = this.selSig = this.cmdSig = this.panelSig = "";
+    this.sig = this.selSig = this.cmdSig = this.panelSig = this.sqSig = "";
     this.panel = ""; $("panel").hidden = true;
     if (!this.mmBase) this.buildMinimapBase();
   }
@@ -69,6 +78,7 @@ export class Hud {
   }
   cmd(c: string) {
     if (!c) return;
+    if (c !== "formMenu" && !c.startsWith("form:")) this.c.formMenu = false;
     if (c === "build") return this.toggle("build");
     if (c === "logistics") return this.toggle("logistics");
     if (c === "center") return this.c.centerOnSelection();
@@ -89,7 +99,10 @@ export class Hud {
       hint.textContent = m.kind === "fob" ? "Place the FOB compound: click open ground · R rotates · right-click cancels" :
         m.kind === "build" ? `Place ${STRUCTURES[m.item!].name} (${g.fob.inventory[m.item!] || 0} left) · R rotates · Shift keeps placing · right-click cancels` :
         m.kind === "supply" ? `${SUPPLIES[m.item!].name}: click the delivery point · right-click cancels` :
-        m.kind === "follow" ? "Click a unit to follow" : m.kind === "patrol" ? "Click the patrol end point" : "Click a point: units advance and engage everything on the way";
+        m.kind === "follow" ? "Click a unit to follow" : m.kind === "patrol" ? "Click the patrol end point" :
+        m.kind === "face" ? "Click the direction the squad should face · right-click cancels" :
+        m.kind === "defendAt" ? "Click the position to defend: soldiers spread round it, behind defences first · G again: defend here" :
+        "Click a point: units advance and engage everything on the way";
     } else hint.hidden = true;
     // boss bar
     const boss = g.get(g.bossId);
@@ -106,6 +119,7 @@ export class Hud {
     for (const b of document.querySelectorAll<HTMLButtonElement>(".speed button")) b.classList.toggle("on", +b.dataset.speed! === this.s.speed);
     $("bFob").hidden = !g.fob.allowed && !g.fob.site;
     this.renderObjectives();
+    this.renderSquads();
     this.renderSelection();
     this.renderCommands();
     if (this.panel) this.renderPanel();
@@ -124,7 +138,8 @@ export class Hud {
     const g = this.s.game!;
     const sel = g.units.filter((u) => u.selected && u.alive);
     const one = sel.length === 1 ? sel[0] : null;
-    const sig = sel.map((u) => u.id + ":" + Math.round(u.hp) + ":" + u.mag + ":" + Math.round(u.reserve) + u.order.kind + (u.reloadT > 0) + u.passengers.length + Math.round(u.suppression * 4) + Math.round(u.medkits)).join(",");
+    const sqs = [...new Set(sel.map((u) => squadOf(g, u)).filter(Boolean))] as any[];
+    const sig = sel.map((u) => u.id + ":" + Math.round(u.hp) + ":" + u.mag + ":" + Math.round(u.reserve) + u.order.kind + (u.reloadT > 0) + u.passengers.length + Math.round(u.suppression * 4) + Math.round(u.medkits) + (u.infectedAt >= 0 ? Math.ceil(u.turnAt - g.time) : "") + (u.detached ? "d" : "")).join(",") + sqs.map((q) => q.formation + q.leader + q.broken).join();
     if (sig === this.selSig) return;
     this.selSig = sig;
     const el = $("selection");
@@ -137,7 +152,10 @@ export class Hud {
       const u = one, w = u.weapon;
       const hpF = u.hp / u.maxHp;
       const status = [u.reloadT > 0 ? "reloading" : "", u.suppression > 0.35 ? "suppressed" : "", u.mag === 0 && u.reserve === 0 && w ? "OUT OF AMMO" : "", u.burn > 0 ? "burning" : ""].filter(Boolean).join(", ");
-      el.innerHTML = `<div class="unitname">${E(u.name)}<small>${E(u.def.name)}${u.group ? " · group " + u.group : ""}</small></div>
+      const sq = u.vehicle ? null : squadOf(g, u);
+      const sqTxt = sq ? `${sq.leader === u.id ? "leader of " : ""}${sq.name}${u.detached ? " (detached — Y regroups)" : ""}` : "";
+      el.innerHTML = `<div class="unitname">${E(u.name)}<small>${E(u.def.name)}${sqTxt ? " · " + E(sqTxt) : ""}${u.group ? " · group " + u.group : ""}</small></div>
+      ${u.infectedAt >= 0 ? `<div class="infected">INFECTED — turns in ${Math.max(0, Math.ceil(u.turnAt - g.time))} s</div>` : ""}
       <div class="detail"><span class="k">Health</span><span>${Math.ceil(u.hp)} / ${u.maxHp}<div class="meter"><i style="width:${hpF * 100}%;background:${hpF > 0.6 ? "#5fd36a" : hpF > 0.3 ? "#e8c44a" : "#e5533d"}"></i></div></span>
       ${w ? `<span class="k">Weapon</span><span>${E(w.name)} · ${u.mag}/${w.mag} · reserve ${Math.round(u.reserve)}</span>` : ""}
       <span class="k">Armor</span><span>${Math.round(u.def.armor * 100)}%</span>
@@ -148,22 +166,42 @@ export class Hud {
       ${u.type === "engineer" ? `<span class="k">Equipment</span><span>${Object.entries(g.fob.inventory).filter(([, n]) => n > 0).map(([k, n]) => `${STRUCTURES[k].name} ×${n}`).join(", ") || "none — request a defensive kit"}</span>` : ""}</div>`;
       return;
     }
-    el.innerHTML = `<div class="unitname">${sel.length} units<small>formation: ${this.c.formation}</small></div><div class="cards">${sel.map((u) => `<div class="card${u.vehicle ? " veh" : ""}" data-id="${u.id}" title="${E(u.name)}"><b>${ABBR[u.type] || "?"}</b><span>${u.weapon ? Math.round(100 * u.ammoFrac) + "%" : ""}</span><div class="hp"><i style="width:${(100 * u.hp) / u.maxHp}%;background:${u.hp / u.maxHp > 0.5 ? "#5fd36a" : "#e5533d"}"></i></div></div>`).join("")}</div>`;
+    const head = sqs.length ? sqs.map((q) => `${q.name} · ${FORMATION_LABEL[q.formation as keyof typeof FORMATION_LABEL]} · ${E(g.get(q.leader)?.name || "")}${q.broken > 0 ? " · BROKEN" : ""}`).join(" | ") : `formation: ${this.c.formation}`;
+    el.innerHTML = `<div class="unitname">${sel.length} units<small>${head}</small></div><div class="cards">${sel.map((u) => `<div class="card${u.vehicle ? " veh" : ""}${u.infectedAt >= 0 ? " inf" : ""}${sqs.some((q) => q.leader === u.id) ? " lead" : ""}" data-id="${u.id}" title="${E(u.name)}${u.infectedAt >= 0 ? " — INFECTED" : ""}"><b>${ABBR[u.type] || "?"}</b><span>${u.weapon ? Math.round(100 * u.ammoFrac) + "%" : ""}</span><div class="hp"><i style="width:${(100 * u.hp) / u.maxHp}%;background:${u.hp / u.maxHp > 0.5 ? "#5fd36a" : "#e5533d"}"></i></div></div>`).join("")}</div>`;
   }
   renderCommands() {
     const g = this.s.game!;
     const sel = g.units.filter((u) => u.selected && u.alive);
     const eng = sel.some((u) => u.type === "engineer"), veh = sel.some((u) => u.vehicle && u.passengers.length);
-    const sig = `${sel.length > 0}${eng}${veh}${this.c.formation}${this.c.mode?.kind || ""}`;
+    const sqs = this.c.selSquads();
+    const one = sel.filter((u) => !u.vehicle).length === 1;
+    const fNow = sqs.length ? sqs[0].formation : null;
+    const sig = `${sel.length > 0}${eng}${veh}${this.c.formation}${this.c.mode?.kind || ""}${fNow}${sqs.length}${one}${this.c.formMenu}`;
     if (sig === this.cmdSig) return;
     this.cmdSig = sig;
-    const dis = sel.length ? "" : " disabled";
+    const dis = sel.length ? "" : " disabled", sdis = sqs.length ? "" : " disabled";
+    const on = (k: string) => (this.c.mode?.kind === k ? ' class="on"' : "");
     const b = (c: string, icon: string, label: string, key: string, extra = "") => `<button data-c="${c}"${extra} title="${label} (${key})"><i>${icon}</i>${label}<kbd>${key}</kbd></button>`;
+    const fl = fNow ? FORMATION_LABEL[fNow] : this.c.formation[0].toUpperCase() + this.c.formation.slice(1);
     $("commands").innerHTML = [
-      b("attackMove", "⚔", "Attack-move", "Z", dis), b("stop", "■", "Stop", "X", dis), b("hold", "⛊", "Hold", "H", dis), b("defend", "⛨", "Defend", "G", dis), b("patrol", "⇄", "Patrol", "P", dis),
-      b("follow", "➜", "Follow", "F", dis), b("retreat", "↩", "Retreat", "R", dis), b("formation", "⋮", this.c.formation[0].toUpperCase() + this.c.formation.slice(1), "K", dis),
+      b("attackMove", "⚔", "Attack-move", "Z", dis + on("attackMove")), b("stop", "■", "Stop", "X", dis), b("hold", "⛊", "Hold", "H", dis), b("defend", "⛨", "Defend", "G", dis + on("defendAt")), b("patrol", "⇄", "Patrol", "P", dis), b("follow", "➜", "Follow", "F", dis), b("retreat", "↩", "Retreat", "R", dis),
+      b("formMenu", fNow ? FORMATION_ICON[fNow] : "⋮", fl, "K", (sqs.length ? "" : dis) + (this.c.formMenu ? ' class="on"' : "")), b("face", "⤢", "Face", "V", dis + on("face")), b("regroup", "⟲", "Regroup", "Y", sdis), b("leader", "★", "Leader", "J", one ? "" : " disabled"), b("newsquad", "⊕", "New squad", "N", sel.some((u) => !u.vehicle) ? "" : " disabled"),
       b("build", "▤", "Build", "B", eng ? "" : " disabled"), veh ? b("unload", "⇩", "Unload", "U") : b("center", "◎", "Center", "Space", dis),
-    ].join("");
+    ].join("") + (this.c.formMenu && sqs.length ? `<div id="formMenu">${FORMATIONS.map((f) => `<button data-c="form:${f}"${f === fNow ? ' class="on"' : ""} title="${FORMATION_LABEL[f]}${OMNI.has(f) ? " — covers every direction" : ""}"><i>${FORMATION_ICON[f]}</i>${FORMATION_LABEL[f]}</button>`).join("")}</div>` : "");
+  }
+  /** squad chips: tap to select a squad, tap twice to centre on it */
+  renderSquads() {
+    const g = this.s.game!;
+    const rows = g.squads.map((q) => {
+      const us = liveMembers(g, q).filter((u) => u.inVehicle === null);
+      const sel = us.length > 0 && us.every((u) => u.selected);
+      const inf = us.some((u) => u.infectedAt >= 0);
+      return { q, n: liveMembers(g, q).length, sel, inf };
+    });
+    const sig = rows.map((r) => `${r.q.id}${r.q.name}${r.n}${r.sel}${r.inf}${r.q.formation}${r.q.broken > 0}${r.q.leader}`).join("|");
+    if (sig === this.sqSig) return;
+    this.sqSig = sig;
+    $("squadbar").innerHTML = rows.map((r) => `<button data-sq="${r.q.id}" class="sq${r.sel ? " on" : ""}${r.q.broken > 0 ? " broken" : ""}${r.inf ? " inf" : ""}" title="${E(r.q.name)}: ${r.n} soldiers, ${FORMATION_LABEL[r.q.formation]} formation, led by ${E(g.get(r.q.leader)?.name || "?")}${r.q.broken > 0 ? " — formation broken" : ""}${r.inf ? " — infected soldier in the squad" : ""}"><b>${E(r.q.name)}</b><span>${FORMATION_ICON[r.q.formation]} ${r.n}</span></button>`).join("");
   }
   // ---------------------------------------------------------------- side panels
   renderPanel() {

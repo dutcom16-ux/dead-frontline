@@ -10,6 +10,8 @@ import { Sfx } from "./game/audio/Sfx";
 import { Saves, Slot } from "./game/save/Saves";
 import { IsoCamera } from "./game/camera/IsoCamera";
 import type { Difficulty } from "./game/Game";
+import { createSquad, setFormation, regroup, faceTo, setLeader, halt, squadOf, attached } from "./game/units/Squads";
+import { infect } from "./game/zombies/Infection";
 import { issue } from "./game/units/UnitAI";
 // @ts-ignore engine is plain JS
 import { PWA } from "./engine/pwa.js";
@@ -48,7 +50,7 @@ class App {
     }
     this.session = new Session(this.bf, this.saves);
     this.render = new SceneRender(this.bf, $("overlay") as HTMLCanvasElement);
-    await this.render.sprites.load("sprites/troops"); // troop sprite sheet; falls back to 3D soldiers if missing
+    await this.render.sprites.load("sprites/"); // soldier and infected sprite sheets; the 3D figures stay as the fallback
     this.render.quality = this.settings.quality;
     this.controls = new Controls(this.session, $("gl"));
     this.controls.edgeScroll = this.settings.edge;
@@ -70,6 +72,7 @@ class App {
     document.addEventListener("visibilitychange", () => { if (document.hidden) this.autosave(); });
     (window as any).__df = this;
     (this as any).__issue = issue; // used by the automated playthrough test
+    (this as any).__squads = { createSquad, setFormation, regroup, faceTo, setLeader, halt, squadOf, attached, infect }; // formation tests
     requestAnimationFrame((t) => this.frame(t));
   }
   applySettings() {

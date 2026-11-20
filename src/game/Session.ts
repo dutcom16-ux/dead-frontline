@@ -8,6 +8,7 @@ import { buildOp01, fobWave } from "./missions/op01";
 import type { Mission } from "./missions/Mission";
 import { CampaignState, newCampaign, completeOp } from "./campaign/Campaign";
 import { Saves, Slot } from "./save/Saves";
+import { serializeSquads, restoreSquads } from "./units/Squads";
 import { Unit, Zombie, Civilian, Nest, Obstacle, Crate, setNextId } from "./entities";
 
 export const STEP = 1 / 30;
@@ -104,9 +105,12 @@ export class Session {
     }
     return {
       version: 1, missionId: m.id, missionName: m.name, time: g.time, seed: g.rng.s, difficulty: g.difficulty,
+      squads: serializeSquads(g),
+      risers: g.risers.map((q) => ({ x: r2(q.x), y: r2(q.y), t: r2(q.t - g.time), ty: q.type, n: q.name, s: q.squad })),
       units: g.units.filter((u) => u.alive).map((u) => ({ id: u.id, t: u.type, n: u.name, x: r2(u.x), y: r2(u.y), h: r2(u.heading), hp: r2(u.hp), mag: u.mag, res: Math.round(u.reserve), k: u.kills, r: u.rank, mk: r2(u.medkits), iv: u.inVehicle, p: u.passengers, g: u.group,
+        dt: u.detached ? 1 : 0, inf: u.infectedAt >= 0 ? r2(u.infectedAt - g.time) : null, turn: u.infectedAt >= 0 ? r2(u.turnAt - g.time) : null,
         o: ["move", "attackMove", "retreat", "defend", "hold"].includes(u.order.kind) ? { kind: u.order.kind, x: u.order.x, y: u.order.y } : { kind: "idle" } })),
-      zombies: g.zombies.filter((z) => !z.dead).map((z) => ({ t: z.type, x: r2(z.x), y: r2(z.y), hp: r2(z.hp), s: z.state === "attack" || z.state === "chase" ? "investigate" : z.state, gx: r2(z.goalX), gy: r2(z.goalY), z: z.zone, a: z.awake ? 1 : 0, b: z.def.boss ? 1 : 0 })),
+      zombies: g.zombies.filter((z) => !z.dead).map((z) => ({ t: z.type, x: r2(z.x), y: r2(z.y), hp: r2(z.hp), s: z.state === "attack" || z.state === "chase" ? "investigate" : z.state, gx: r2(z.goalX), gy: r2(z.goalY), z: z.zone, a: z.awake ? 1 : 0, b: z.def.boss ? 1 : 0, so: z.soldier || undefined, mh: z.soldier ? z.maxHp : undefined })),
       civs: g.civs.filter((c) => !c.dead && c.state !== "gone").map((c) => ({ x: r2(c.x), y: r2(c.y), o: c.objective, m: c.military, s: c.state === "evac" ? "following" : c.state })),
       nests: g.nests.filter((n) => !n.dead).map((n) => ({ x: r2(n.x), y: r2(n.y), hp: r2(n.hp), z: n.zone, s: n.size })),
       obstacles: g.obstacles.filter((o) => !o.dead && !o.fob).map((o) => ({ k: o.kind, x: r2(o.x), y: r2(o.y), r: r2(o.rot), hp: r2(o.hp), b: o.built })),
@@ -126,6 +130,7 @@ export class Session {
     for (const q of s.units) {
       const u = new Unit(q.t, q.x, q.y, q.n);
       u.heading = q.h; u.hp = q.hp; u.mag = q.mag; u.reserve = q.res; u.kills = q.k; u.rank = q.r; u.medkits = q.mk; u.group = q.g || 0;
+      if (q.inf != null) { u.infectedAt = g.time + q.inf; u.turnAt = g.time + q.turn; }
       u.z = this.bf.h(u.x, u.y);
       g.units.push(u); g.byId.set(u.id, u); idMap.set(q.id, u);
       if (q.o && (q.o.kind === "hold" || q.o.kind === "defend")) { u.order = { kind: q.o.kind }; u.defendAt = [u.x, u.y]; }
@@ -140,6 +145,7 @@ export class Session {
       const z = new Zombie(q.t, q.x, q.y);
       z.hp = q.hp; z.state = q.s; z.goalX = q.gx; z.goalY = q.gy; z.zone = q.z; z.awake = !!q.a; z.z = this.bf.h(z.x, z.y);
       const k = g.difficulty === "low" ? 0.85 : g.difficulty === "high" ? 1.2 : 1; z.maxHp = Math.round(z.def.hp * k);
+      if (q.so) { z.soldier = q.so; z.maxHp = q.mh || 150; }
       g.zombies.push(z); g.byId.set(z.id, z);
       if (q.b) g.bossId = z.id;
     }
@@ -148,6 +154,11 @@ export class Session {
     for (const q of s.obstacles) { const o = g.addObstacle(q.k, q.x, q.y, q.r, q.b); o.hp = q.hp; }
     for (const q of s.crates) { const c = new Crate(q.x, q.y, q.l); c.ammo = q.a; c.medical = q.m; c.heal = q.h; c.deploy = q.d; c.engineering = q.e; c.z = this.bf.h(c.x, c.y); g.crates.push(c); g.byId.set(c.id, c); }
     g.corpses = (s.corpses || []).map((c: any) => ({ ...c, t: g.time + c.t }));
+    g.rebuildPiles();
+    g.risers = (s.risers || []).map((q: any) => ({ x: q.x, y: q.y, t: g.time + q.t, type: q.ty, name: q.n, squad: q.s, corpse: null }));
+    // squads (older saves: everyone forms one squad)
+    for (const q of s.units) { const u = idMap.get(q.id); if (u && q.dt) u.detached = true; }
+    restoreSquads(g, s.squads, idMap);
     g.radioLog = (s.radio || []).map((r: any) => ({ ...r, t: g.time + r.t }));
     for (const q of s.buildings || []) {
       const b = this.bf.map.getBuilding(q.id);

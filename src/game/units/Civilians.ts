@@ -1,6 +1,7 @@
 // Survivors: hide until soldiers reach them, then follow the squad; once their area is secure a
 // helicopter evacuates them. Military survivors join the player's force instead.
 import type { Game } from "../Game";
+import { ensureSquads, squadOf } from "./Squads";
 import { Civilian, Transport } from "../entities";
 import { dist } from "../core";
 import { openDoors } from "./UnitAI";
@@ -77,7 +78,9 @@ function joinForce(g: Game, c: Civilian) {
   const u = g.addUnit(c.military!, c.x, c.y);
   u.hp = u.maxHp * 0.6;
   if (u.weapon) { u.mag = Math.ceil(u.weapon.mag * 0.5); u.reserve = Math.ceil(u.weapon.reserve * 0.3); }
-  g.radio(`${u.name} (3rd Engineer platoon) joins your task force.`, "good");
+  ensureSquads(g, 120);
+  const sq = squadOf(g, u);
+  g.radio(`${u.name} (3rd Engineer platoon) joins your task force${sq ? ` — assigned to ${sq.name}` : ""}.`, "good");
   g.onEvent("joined", u);
 }
 
