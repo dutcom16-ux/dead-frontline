@@ -168,7 +168,11 @@ export class Game {
       for (const pid of u.passengers) { const p = this.get(pid); if (p) { p.inVehicle = null; p.x = u.x + this.rng.range(-3, 3); p.y = u.y + this.rng.range(-3, 3); this.damage(p, 40, null, "blast"); } }
       u.passengers = [];
       this.addObstacle("wreck", u.x, u.y, u.heading);
-    } else this.corpse(u.x, u.y, u.z, u.heading, u.def.color, 1, "corpse");
+    } else {
+      this.corpse(u.x, u.y, u.z, u.heading, u.def.color, 1, "corpse");
+      const c = this.corpses[this.corpses.length - 1];
+      c.sprite = true; c.flip = Math.cos(u.heading) < 0; // drawn with the troop sprite sheet's death animation
+    }
     this.onEvent("udeath", u);
   }
   corpse(x: number, y: number, z: number, rot: number, col: [number, number, number], s: number, model: string) {

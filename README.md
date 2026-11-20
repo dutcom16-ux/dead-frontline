@@ -92,9 +92,13 @@ run by the automated test.
   logistics with stock 0 and is locked behind a campaign flag.
 * **Strategic map coastlines.** Operation markers sit at real coordinates, but island outlines are not
   drawn. Natural Earth data could be added.
-* **Art.** Units, infected, vehicles and defences are code-generated low-poly placeholders. Buildings
-  use the procedural Philippine archetypes from the Toledo map engine. You can replace the art later
-  (see Project structure).
+* **Art.** Infantry now use your troop sprite sheet (see below). Infected, vehicles and defences are
+  still code-generated low-poly placeholders. Buildings use the procedural Philippine archetypes from
+  the Toledo map engine.
+* **Troop sprites: no back view, one look for all classes.** The sheet's art has front-facing and
+  right-facing poses only (its direction labels don't match the drawings). Left is the right view
+  mirrored, and soldiers walking away from the camera use the side view. Every infantry class (rifleman,
+  medic, sniper, ...) uses the same soldier art; tell them apart by the labels and the selection panel.
 * **Infected vs. FOB buildings.** Infected attack defences, gates and doors. They do not damage the
   FOB facility buildings themselves.
 * **Vehicles in tight alleys.** Vehicles plan on the same 0.5 m grid as infantry. They back up and
@@ -103,7 +107,7 @@ run by the automated test.
 * **Pathing on this map.** Units now detour, sidestep corners and, as a last resort, step out to
   the street after about 12 s without progress. That last step is visible as a short hop. The causes
   are AI-detected footprints that overlap roads or each other, and OSM bridges that end at the bank.
-* **Asset loader.** There is no glTF or sprite-sheet import yet (see `docs/ASSETS.md`).
+* **Asset loader.** Sprite sheets load (troops). There is no glTF model import yet (see `docs/ASSETS.md`).
 * **Day/night, weather and music.** Not done. There is ambient wind only.
 * **Engine choice.** The spec prefers Phaser 3 + Vite. Network installs are blocked in the build
   environment, so the game runs on the project's own zero-dependency WebGL2 engine, the same one that
@@ -142,10 +146,11 @@ src/game/missions/         Mission framework, op01 (Toledo)
 src/game/fob/              the single FOB
 src/game/logistics/        supply requests and transports
 src/game/campaign/         campaign state      src/game/save/   save slots
-src/game/rendering/        Models (placeholder art), SceneRender
+src/game/rendering/        Models (placeholder art), SceneRender, Sprites (troop sprite sheet)
 src/game/ui/               Hud, Menus          src/game/audio/  Sfx
 data/                      units, weapons, vehicles, infected, structures, supplies, campaign, missions (JSON)
-public/                    map package, icons, manifest
+public/                    map package, troop sprite sheet, icons, manifest
+tools/slice_sprites.py     cuts assets/source/troops_sheet.png into public/sprites/
 tools/                     build, dev server, service-worker template
 test/                      headless playthrough
 ```

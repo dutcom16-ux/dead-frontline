@@ -1,7 +1,25 @@
 # Art and audio assets
 
-Right now every visual and sound in the game is generated in code, so the game has no asset files to
-download. When you have real art, this is where it plugs in.
+Infantry and combat effects come from a sprite sheet. Every other visual and every sound is generated
+in code. When you have more art, this is where it plugs in.
+
+## Troop sprite sheet (`public/sprites/troops.png` + `troops.json`)
+
+* **Source:** the sprite sheet you supplied (`assets/source/troops_sheet.png`, 1536×1024). Record its
+  licence here. The Vercel site is public, so the sheet must be one you may redistribute.
+* **Slicing:** `python3 tools/slice_sprites.py` cuts the sheet into a packed atlas. Soldiers: the black
+  background is removed by a flood fill from the cell border. Effects: brightness becomes alpha. Each
+  frame stores its feet anchor (`ax`, `ay`).
+* **Clips in use:** `idle_front`, `walk_front`, `walk_side`, `run_front`, `run_side`, `aim_side`,
+  `fire_side`, `reload_front`, `hurt_front`, `die_front` (last frame = lying), `crouch_front`, and the
+  effects `explosion`, `smoke`, `bloodhit`, `sparks`. `muzzle` and `blood` are sliced but not used yet.
+* **Directions:** front clips face the viewer and side clips face screen-right. The renderer mirrors the
+  side clips for left. The sheet has no back view.
+* **Drawing:** `src/game/rendering/Sprites.ts` draws them on the 2D overlay, sorted by screen depth,
+  sized to about 2.4 m (never below 18 px). A soldier behind a building is drawn at 45 % opacity.
+* **Fallback:** if `troops.png` or `troops.json` fails to load, the game draws the old 3D soldiers.
+
+To swap in a different sheet, keep the clip names, rerun the slicer with new cell boxes, and rebuild.
 
 ## Units, infected, vehicles, defences (`src/game/rendering/Models.ts`)
 
@@ -16,7 +34,8 @@ download. When you have real art, this is where it plugs in.
 
 To use real models, convert them (glTF → positions, normals, colours) at build time into the same
 `{ v, c, n, idx }` shape and return them from these functions. Everything else stays the same:
-instancing, culling and per-instance tint. **A glTF or sprite-sheet loader is not implemented yet.**
+instancing, culling and per-instance tint. **A glTF loader is not implemented yet.** Infantry are
+drawn from the troop sprite sheet instead of these models when it loads.
 
 ## Buildings
 

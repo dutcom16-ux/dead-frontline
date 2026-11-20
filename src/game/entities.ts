@@ -123,7 +123,7 @@ export class Crate {
 
 export interface Projectile { x: number; y: number; z: number; tx: number; ty: number; tz: number; speed: number; radius: number; damage: number; owner: number; kind: string; t: number }
 export interface Effect { kind: string; x: number; y: number; z: number; t: number; life: number; s: number; rot?: number; col?: [number, number, number]; x2?: number; y2?: number; z2?: number }
-export interface Corpse { x: number; y: number; z: number; rot: number; col: [number, number, number]; s: number; t: number; model: string }
+export interface Corpse { x: number; y: number; z: number; rot: number; col: [number, number, number]; s: number; t: number; model: string; sprite?: boolean; flip?: boolean }
 export interface Fire { x: number; y: number; r: number; t: number; dps: number }
 export interface Noise { x: number; y: number; r: number; t: number }
 /** transport visuals (helicopters, convoy trucks): fly or drive in, deliver, leave */

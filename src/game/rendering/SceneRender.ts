@@ -7,6 +7,7 @@ import { MODELS, UNIT_MODEL, rotFor } from "./Models";
 import { Unit } from "../entities";
 import { STRUCTURES } from "../data";
 import { dist } from "../core";
+import { Sprites } from "./Sprites";
 
 type Inst = { x: number; y: number; z: number; rot: number; col: number[]; s: number };
 const C = {
@@ -20,6 +21,8 @@ export class SceneRender {
   bf: Battlefield; lists = new Map<string, Inst[]>();
   overlay: HTMLCanvasElement; ctx: CanvasRenderingContext2D;
   quality = "medium";
+  sprites = new Sprites();
+  cam: IsoCamera | null = null; time = 0;
   constructor(bf: Battlefield, overlay: HTMLCanvasElement) {
     this.bf = bf; this.overlay = overlay; this.ctx = overlay.getContext("2d")!;
     for (const [k, fn] of Object.entries(MODELS)) bf.world.defineInstanced("m_" + k, fn());
@@ -43,10 +46,11 @@ export class SceneRender {
         if (!u.alive || u.inVehicle !== null || !vis(u.x, u.y)) continue;
         const flash = u.hitT > 0 ? 1.8 : 1;
         const col = u.def.color.map((c) => c * flash);
-        this.put("m_" + (UNIT_MODEL[u.type] || "soldier"), u.x, u.y, u.z, rotFor(u.heading), col, 1);
+        const spr = this.sprites.covers(u); // infantry come from the troop sprite sheet (overlay)
+        if (!spr) this.put("m_" + (UNIT_MODEL[u.type] || "soldier"), u.x, u.y, u.z, rotFor(u.heading), col, 1);
         if (u.selected) this.put("m_ring", u.x, u.y, u.z, 0, C.sel, u.vehicle ? u.r * 1.4 : 1);
         else if (ui.hover === u.id) this.put("m_ring", u.x, u.y, u.z, 0, C.hover, u.vehicle ? u.r * 1.4 : 1);
-        if (u.flashT > 0 && u.weapon && u.wid !== "flamer") {
+        if (u.flashT > 0 && u.weapon && u.wid !== "flamer" && !spr) {
           const c = Math.cos(u.heading), s = Math.sin(u.heading), len = u.vehicle ? (u.wid === "tank_gun" ? 6.5 : 3) : 1.0;
           this.put("m_flash", u.x + c * len, u.y + s * len, u.z + (u.vehicle ? 2.4 : 1.17), rotFor(u.heading), C.flash, u.wid === "tank_gun" ? 3 : 0.9);
         }
@@ -74,10 +78,10 @@ export class SceneRender {
       // ---- survivors
       for (const c of g.civs) {
         if (c.dead || c.state === "gone" || !vis(c.x, c.y)) continue;
-        this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
+        if (!(c.military && this.sprites.ready)) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
         if (c.state === "hiding") this.put("m_beacon", c.x, c.y, c.z + 2.6 + Math.sin(T * 3 + c.id) * 0.15, T * 2, [0.3, 0.75, 1.0], 0.35);
       }
-      for (const c of g.corpses) if (vis(c.x, c.y)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);
+      for (const c of g.corpses) if (vis(c.x, c.y) && !(c.sprite && this.sprites.ready)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);
       // ---- objects
       for (const c of g.crates) if (!c.dead && vis(c.x, c.y)) this.put("m_crate", c.x, c.y, c.z, c.id, c.medical ? C.med : c.deploy || c.engineering ? C.kit : C.ammo, 1);
       for (const o of g.obstacles) {
@@ -127,8 +131,10 @@ export class SceneRender {
       }
       // ---- effects
       const tracers: number[] = [];
+      const fxSprites = this.sprites.ready;
       for (const e of g.effects) {
         if (!vis(e.x, e.y, 20)) continue;
+        if (fxSprites && (e.kind === "blast" || e.kind === "smoke" || e.kind === "hit" || e.kind === "spark")) continue; // sprite sheet effects
         const f = e.t / e.life;
         switch (e.kind) {
           case "tracer": tracers.push(e.x, e.z, -e.y, e.x2!, e.z2!, -e.y2!); break;
@@ -179,6 +185,7 @@ export class SceneRender {
     const view = cam.view(time);
     if (g && g.shake > 0) { const s = g.shake * 0.4 * (cam.zoom / 60); const j = Math.sin(time * 91.7) * 0.5; view.eye[0] += j * s; view.target[0] += j * s; }
     bf.r.render(view, scene);
+    this.cam = cam; this.time = time;
     this.drawOverlay(g, cam, ui);
     return scene;
   }
@@ -191,6 +198,7 @@ export class SceneRender {
     ctx.clearRect(0, 0, W, H);
     if (!g) return;
     const bf = this.bf;
+    this.sprites.draw(ctx, g, bf, cam, W, H, this.time);
     const px = 1 / (cam.zoom / 60);
     const bar = (x: number, y: number, w: number, f: number, col: string, h = 4) => {
       ctx.fillStyle = "rgba(0,0,0,.6)"; ctx.fillRect(x - w / 2 - 1, y - 1, w + 2, h + 2);

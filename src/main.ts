@@ -48,6 +48,7 @@ class App {
     }
     this.session = new Session(this.bf, this.saves);
     this.render = new SceneRender(this.bf, $("overlay") as HTMLCanvasElement);
+    await this.render.sprites.load("sprites/troops"); // troop sprite sheet; falls back to 3D soldiers if missing
     this.render.quality = this.settings.quality;
     this.controls = new Controls(this.session, $("gl"));
     this.controls.edgeScroll = this.settings.edge;
