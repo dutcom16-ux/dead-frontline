@@ -13,7 +13,8 @@
     "test:systems": "node test/systems.mjs",
     "test:mobile": "node test/mobile.mjs",
     "test:formations": "node test/formations.mjs dist",
-    "test:anim": "node test/anim.mjs dist"
+    "test:anim": "node test/anim.mjs dist",
+    "test:units": "node test/units.mjs dist"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

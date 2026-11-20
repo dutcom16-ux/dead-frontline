@@ -148,18 +148,81 @@ T.save(os.path.join(OUT, "effects.png"), os.path.join(OUT, "effects.json"),
        "user-supplied sprite sheet 8085.png (effects); tools/slice_sprites.py", 84)
 
 print("zombies")
+# Sheet B's infected frames are a loose collection: the rows mix different people and facings and
+# are not drawn in leg order. Each clip below takes frames of one person and one facing (checked
+# frame by frame; see docs/ASSETS.md) and puts them in the order that changes the silhouette least
+# from frame to frame, so the loop runs smoothly. Standing figures are anchored at the hips (the
+# root of the movement: spread feet and reaching arms don't shift the body); lying ones at their middle.
+def zcut(blk, r, c, anchor="hip"):
+    img, (ax, ay), _ = cut(B, GRID[(r, blk)][c])
+    a = np.asarray(img); m = a[..., 3] > 100
+    ys, xs = np.nonzero(m); top, bot = ys.min(), ys.max(); h = bot - top
+    if anchor == "hip":
+        band = (ys >= top + 0.45 * h) & (ys <= top + 0.58 * h)
+        ax = float(np.median(xs[band]))
+    else:
+        ax = float((xs.min() + xs.max()) / 2)
+    return (img, (ax, ay), (0, 0), 1.0)
+
+def zframes(spec, anchor="hip"):
+    return [zcut(blk, r, c, anchor) for blk, r, cs in spec for c in cs]
+
+def placed(items):
+    """alpha masks of the frames on one canvas, anchors aligned"""
+    L = max(it[1][0] for it in items); R = max(it[0].width - it[1][0] for it in items)
+    T = max(it[1][1] for it in items); D = max(it[0].height - it[1][1] for it in items)
+    W, H = int(L + R) + 2, int(T + D) + 2
+    out = []
+    for img, (ax, ay), _, _ in items:
+        c = np.zeros((H, W), np.float32); a = np.asarray(img)[..., 3] / 255.0
+        x0, y0 = int(round(L - ax)), int(round(T - ay))
+        c[y0:y0 + a.shape[0], x0:x0 + a.shape[1]] = a
+        out.append(c)
+    return out
+
+def smooth_loop(items):
+    """reorder frames into the loop with the least total silhouette change (first frame kept first)"""
+    from itertools import permutations
+    n = len(items)
+    if n <= 2: return items
+    m = placed(items)
+    D = [[float(np.abs(m[i] - m[j]).mean()) for j in range(n)] for i in range(n)]
+    best, order = 1e9, list(range(n))
+    for p in permutations(range(1, n)):
+        if p[0] > p[-1]: continue                       # a loop and its reverse are the same
+        q = (0,) + p
+        cost = sum(D[q[i]][q[(i + 1) % n]] for i in range(n))
+        if cost < best: best, order = cost, list(q)
+    return [items[i] for i in order]
+
+def by_reach(items):
+    """attack frames from the least to the most extended arm (facing screen-right): ready ... strike"""
+    def reach(it):
+        a = np.asarray(it[0])[..., 3] > 100; ys, xs = np.nonzero(a)
+        up = ys < ys.min() + 0.6 * (ys.max() - ys.min())
+        return xs[up].max() - it[1][0]
+    return sorted(items, key=reach)
+
 Z = Atlas()
-Z.add("idle_S", B_(0, "L"));  Z.add("idle_S2", B_(4, "L"))
-Z.add("back_N", B_(1, "L", [4]) + B_(2, "L", [4]))
-Z.add("attack_E", B_(3, "L"))
-Z.add("walk_S", B_(0, "M")); Z.add("walk_S2", B_(1, "M")); Z.add("walk_S3", B_(2, "M"))
-Z.add("walk_E", B_(3, "M", [0, 1, 2, 3, 4])); Z.add("hunch_E", B_(4, "M", [0, 1, 2, 3, 4, 5, 6]))
-Z.add("lunge_E", B_(3, "M", [5, 6, 7, 8]))
-Z.add("run_E", B_(0, "R")); Z.add("run_E2", B_(1, "R")); Z.add("run_E3", B_(2, "R")); Z.add("charge_E", B_(3, "R"))
-Z.add("crawl_E", B_(4, "R")); Z.add("dead", B_(4, "M", [7]) + B_(4, "R", [3, 5]))
+Z.add("idle_S", zframes([("L", 0, range(6))]))                 # facing the viewer; six different faces
+Z.add("idle_S2", zframes([("L", 4, range(6))]))
+Z.add("back_N", zframes([("L", 1, [4]), ("L", 2, [4])]))       # back to the viewer (two people)
+Z.add("walk_SW", smooth_loop(zframes([("M", 0, range(9))])))   # three-quarter front, facing left
+Z.add("walk_SW2", smooth_loop(zframes([("M", 1, [3, 5, 6, 8]), ("M", 2, [3, 6, 7])])))
+Z.add("walk_E", smooth_loop(zframes([("M", 3, range(5))])))    # side on, facing right
+Z.add("hunch_E", smooth_loop(zframes([("M", 4, range(5))])))
+Z.add("lunge_E", by_reach(zframes([("M", 3, [5, 6, 7, 8])])))  # walk_E's man attacking
+Z.add("claw_E", by_reach(zframes([("M", 4, [2, 5, 6])])))      # hunch_E's man attacking
+Z.add("attack_E", by_reach(zframes([("L", 3, range(6))])))
+Z.add("run_E", smooth_loop(zframes([("R", 1, range(7))])))
+Z.add("run_E2", smooth_loop(zframes([("R", 0, range(5))])))
+Z.add("run_E3", smooth_loop(zframes([("R", 2, [3, 4, 5, 6])])))
+Z.add("charge_E", smooth_loop(zframes([("R", 3, range(7))])))
+Z.add("crawl_E", smooth_loop(zframes([("R", 4, [0, 1, 2, 4])], "centre")))
+Z.add("crawl_attack_E", by_reach(zframes([("R", 4, [0, 1, 2, 4])], "centre")))   # the crawl frames by reach: the grab
+Z.add("dead", zframes([("R", 4, [3, 5])], "centre"))
 Z.save(os.path.join(OUT, "zombies.png"), os.path.join(OUT, "zombies.json"),
        "user-supplied sprite sheet 8086.png (infected rows); tools/slice_sprites.py", 92)
-
 
 # ---------------------------------------------------------------- 8-direction infected soldier sheet (8089)
 # 8 rows x 10 columns on a transparent background. Rows, clockwise from facing away from the viewer:
@@ -214,8 +277,12 @@ def sheet8(path, rows_y):
             im = im.crop((max(0, xs.min() - 1), max(0, ys.min() - 1), min(im.width, xs.max() + 2), min(im.height, ys.max() + 2)))
             a = np.asarray(im)[..., 3]
             ys, xs = np.nonzero(a > 40)
-            cut = ys.max() - max(2, int((ys.max() - ys.min()) * 0.12))
-            ax = float(xs[ys >= cut].mean())
+            top, bot = ys.min(), ys.max(); h = bot - top
+            if len(items) < 8:      # standing (walk, attack, first falling frame): the hips, the root of the movement
+                band = (ys >= top + 0.45 * h) & (ys <= top + 0.58 * h)
+                ax = float(np.median(xs[band]))
+            else:                   # kneeling and lying: the middle of the body
+                ax = float((xs.min() + xs.max()) / 2)
             items.append((im, (ax, float(ys.max() + 1)), (0, 0), 1.0))
         out[DIRS8[r]] = items
     return out
@@ -236,8 +303,17 @@ def olive(items):
 print("infected_soldier8")
 ZS = sheet8(os.path.join(ROOT, "assets/source/zombie_soldier_8dir.png"), [78, 233, 380, 526, 668, 802, 930, 1056])
 S8 = Atlas()
+VEC8 = {"N": (0, -1), "NE": (0.7, -0.7), "E": (1, 0), "SE": (0.9, 0.45), "S": (0, 1), "SW": (-0.9, 0.45), "W": (-1, 0), "NW": (-0.7, -0.7)}
+def reach8(items, d):
+    """reach + grab frames from the less to the more extended arm (along the view's direction)"""
+    vx, vy = VEC8[d]
+    def r(it):
+        a = np.asarray(it[0])[..., 3] > 100; ys, xs = np.nonzero(a)
+        up = ys < ys.min() + 0.7 * (ys.max() - ys.min())
+        return float(((xs[up] - it[1][0]) * vx + (ys[up] - it[1][1]) * vy).max())
+    return sorted(items, key=r)
 for d in DIRS8:
-    S8.add("z_walk_" + d, olive(ZS[d][0:5])); S8.add("z_attack_" + d, olive(ZS[d][5:7])); S8.add("z_die_" + d, olive(ZS[d][7:10]))
+    S8.add("z_walk_" + d, olive(ZS[d][0:5])); S8.add("z_attack_" + d, olive(reach8(ZS[d][5:7], d))); S8.add("z_die_" + d, olive(ZS[d][7:10]))
 S8.save(os.path.join(OUT, "infected_soldier8.png"), os.path.join(OUT, "infected_soldier8.json"),
         "user-supplied 8-direction sheet 8089.png (infected soldier), re-dyed olive; tools/slice_sprites.py", STAND8)
 
@@ -396,10 +472,14 @@ for g, d in enumerate(MDIRS):
     proj = [((mz[0] - an[0]) * AIM[d][0] + (mz[1] - an[1]) * AIM[d][1]) if d != "S" else mz[1] for im, an, mz, k in fitems]
     order = sorted(range(3), key=lambda i: proj[i])          # back ... out
     aim, shot, recoil = order[1], order[2], order[0]
-    witems = [(im, anchor_stand(im), (0, 0), 1.0) for im in W]
-    ditems = [(im, anchor_stand(im), (0, 0), 1.0) for im in D[:4]] + [(im, anchor_lying(im), (0, 0), 1.0) for im in D[4:]]
+    # one size for every direction: the sheet draws some directions up to ~5 % taller than others, so
+    # each direction is scaled (at draw time, field k) to the common standing height
+    kd = H0 / mw
+    fitems = [(im, an, mz, kd) for im, an, mz, _ in fitems]
+    witems = [(im, anchor_stand(im), (0, 0), kd) for im in W]
+    ditems = [(im, anchor_stand(im), (0, 0), kd) for im in D[:4]] + [(im, anchor_lying(im), (0, 0), kd) for im in D[4:]]
     clips[d] = {"walk": [witems[i] for i in cycle], "idle": [witems[p]], "fire": [fitems[aim], fitems[shot], fitems[recoil]], "die": ditems}
-    report.append(f"  {d:2s}: walk {[round(h) for h in hw]} px, cycle {cycle}; fire order aim/shot/recoil {aim}/{shot}/{recoil}; dying x{kdie:.2f}")
+    report.append(f"  {d:2s}: walk {[round(h) for h in hw]} px (x{kd:.3f}), cycle {cycle}; fire order aim/shot/recoil {aim}/{shot}/{recoil}; dying x{kdie:.2f}")
 # SE: the sheet's SE groups face east; use SW mirrored (see note above)
 clips["SE_sheet"] = clips["SE"]
 clips["SE"] = {k: [mirror(it) for it in v] for k, v in clips["SW"].items()}

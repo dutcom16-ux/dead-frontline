@@ -162,7 +162,7 @@ export class Game {
     this.stats.kills[z.type] = (this.stats.kills[z.type] || 0) + 1;
     const s = this.get(src);
     if (s instanceof Unit) { s.kills++; if (s.kills % 25 === 0 && s.rank < 3) { s.rank++; if (!s.vehicle) s.name = s.name.replace(/^\S+/, RANKS[s.rank]); } }
-    this.corpse(z.x, z.y, z.z, z.heading, z.def.color, z.def.size, z.type === "abomination" ? "abomination" : "corpse", { kind: z.type, soldier: z.soldier || undefined, flip: Math.cos(z.heading) < 0 });
+    this.corpse(z.x, z.y, z.z, z.heading, z.def.color, z.def.size, z.type === "abomination" ? "abomination" : "corpse", { kind: z.type, soldier: z.soldier || undefined, uid: z.id, flip: Math.cos(z.heading) < 0 });
     this.effect("blood", z.x, z.y, z.z, 40, 0.8 + z.def.size * 0.5);
     if (z.def.explode) { this.onSound("bloater", z.x, z.y); this.explode(z.x, z.y, z.z, z.def.explode.radius, z.def.explode.damage, null, "gas"); }
     if (z.def.boss) { this.radio("The Abomination is down!", "good"); this.onEvent("boss", z); this.shake = 1; }

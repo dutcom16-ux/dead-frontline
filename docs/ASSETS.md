@@ -37,6 +37,8 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
   * The dying section is drawn about 11–20 % smaller than the walking one. Each direction's dying
     frames are scaled so the standing ones match that direction's walking height.
   * Frame-to-frame size noise within a clip is evened out (at most ±6 %).
+  * The sheet draws some directions up to about 5 % taller than others (N tallest, W shortest).
+    Every direction is scaled at draw time (frame field `k`) to one standing height.
   * Standing frames are anchored at the feet, between head and hips, so a step doesn't shift the
     figure. Lying frames are anchored at the body's middle.
 * **Clips** (`<D>` = N, NE, E, SE, S, SW, W, NW):
@@ -56,6 +58,8 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
     frame for 0.06 s with the muzzle flash, then the recoil frame for 0.08 s, then aim. Soldiers whose
     weapon fires on the move keep the firing stance while moving; machine gunners, snipers and
     rocket troops walk and fire only when stopped.
+  * A walk starts on its first stride frame (a step), never mid-cycle; stopping shows the standing
+    (passing) frame.
   * Walking faces the way the soldier really goes. The cycle (two steps) advances with the distance
     covered: 1.4 m plus 0.25 m per m/s of speed, about 2.3 m at a rifleman's 3.6 m/s and shorter at a
     slow formation pace. The feet don't slide.
@@ -74,13 +78,18 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
 
 * **Source:** `assets/source/zombie_soldier_8dir.png` (8089.png), transparent background. 8 rows ×
   10 columns. Rows, clockwise from facing away from the viewer: N, NE, E, SE, S, SW, W, NW.
-  * Columns 1–5: walk cycle, from standing to a full stride (played back and forth: 2-3-4-5-4-3).
+  * Columns 1–5: one stride, from standing to a full lunge (there is no second, alternating stride).
   * Columns 6–7: reach and grab.
   * Columns 8–10: falling and lying dead.
 * **Slicing:** by grid cell (some frames touch). Each row is scaled so the standing figure is 100 px
-  tall, because the sheet's rows are not drawn at one size. Tan cloth is re-dyed olive to match the
-  soldiers' uniform.
+  tall, because the sheet's rows are not drawn at one size. Standing frames are anchored at the hips
+  (the stride doesn't shift the body); kneeling and lying ones at the body's middle. Reach frames are
+  ordered by how far the arm reaches along the view (ready, grab).
 * **Clips:** `z_walk_<D>`, `z_attack_<D>`, `z_die_<D>`.
+* **In the game** (`zpose8`): steadied 8-direction views as for soldiers, facing the way he really
+  moves or his victim. The step cycle (stride frames 1-2-3-4-3-2 when hurrying, 0-1-2-3-2-1 slower)
+  advances 1.4 m per loop; the grab frame is shown on each real hit. Dying plays once in his last
+  view (6 fps) and the last frame stays.
 
 ## Infected sheet (`public/sprites/zombies.*`) and effects (`public/sprites/effects.*`)
 
@@ -89,13 +98,58 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
   * `assets/source/troops_sheet.png` (8085.png): explosion, smoke, blood and sparks.
 * **Slicing:** black backgrounds are removed by a flood fill from the cell border, with thin dark seams
   kept inside the figure.
-* **Directions:** the sheet's direction labels don't match the drawings, so clips are named by what the
-  art shows: `S` = facing the viewer, `SE` = three-quarter front-right, `E` = facing screen-right,
-  `N` = back to the viewer. West-facing views are mirrored at draw time.
-* **Infected clips:** `idle_S`, `idle_S2`, `back_N`, `attack_E`, `walk_S`, `walk_S2`, `walk_S3`,
-  `walk_E`, `hunch_E`, `lunge_E`, `run_E`, `run_E2`, `run_E3`, `charge_E`, `crawl_E`, `dead`.
-  Bloater, brute, screamer and mutant are tinted and scaled walkers.
+* **What the infected sheet holds** (checked frame by frame): rows of loosely related frames, not
+  animation cycles. A row can mix different people (faces and hair change from frame to frame), mix
+  facings (front, three-quarter, side) and is not in leg order. The rows labelled as front walks are
+  mostly three-quarter views facing **left** (SW). There is no front (S) walk, no NE/NW view, no
+  falling frames, and only two back views (two different people).
+* **Clips** (each built from frames of one person and one facing):
+
+  | Clip | Source frames (block, row, columns) | Facing |
+  |---|---|---|
+  | `idle_S`, `idle_S2` | left block rows 1 and 5 | front (six different faces each) |
+  | `back_N` | left block rows 2 and 3, column 5 | back |
+  | `walk_SW` | middle row 1 (all) | three-quarter front, left |
+  | `walk_SW2` | middle rows 2–3, the long-haired, left-facing frames | three-quarter front, left |
+  | `walk_E`, `lunge_E` | middle row 4: walking, then attacking | side, right |
+  | `hunch_E`, `claw_E` | middle row 5: walking, then reaching | side, right |
+  | `attack_E` | left block row 4 | side, right |
+  | `run_E`, `run_E2`, `run_E3`, `charge_E` | right block rows 2, 1 (first 5), 3 (last 4), 4 | side, right |
+  | `crawl_E`, `crawl_attack_E` | right block row 5, crawling frames | side, right |
+  | `dead` | right block row 5, the two lying frames | lying |
+
+  * Walk, run and crawl loops are put in the order that changes the silhouette least from frame to
+    frame (the sheet order jumps), so each loop runs smoothly.
+  * Attack clips are ordered from the ready pose to the full reach.
+  * Standing figures are anchored at the hips, lying ones at their middle. Before this, anchors were
+    between the feet, which made running bodies jump back and forth by up to a quarter of their height.
+  * Removed: a "dead" frame that also contained a crouching infected; the face-changing middle rows
+    as walk cycles.
+* **In the game** (`zpose`):
+  * Eight screen views, steadied as for soldiers, facing the way the infected really moves (or its
+    victim). Drawn with the nearest view: S and SW the three-quarter clip, SE that clip mirrored, E
+    and NE the side clip, W and NW mirrored, N from behind (mirrored on alternate steps, which swaps
+    the legs).
+  * Walk, run and crawl loops advance with the distance covered (`LOOP_M` in Sprites.ts); runners
+    switch to a run clip above 2.4 m/s; mutants charge.
+  * Standing: one fixed frame per infected (front, side or back by its view) with slow breathing, no
+    cycling through the row's different faces.
+  * Attacking: the full-reach frame on each real hit (the attack timer restarting), back to ready
+    over 0.3 s, wind-up over the last 0.35 s before the next hit. Crawlers use their most
+    outstretched crawl frame.
+  * Death: the last pose tips over about the feet and gives way to a lying frame on the same side
+    within 0.45 s; the body then stays.
+  * Bloater, brute, screamer and mutant are tinted and scaled walkers.
 * **Effect clips:** `explosion`, `smoke`, `blood`, `bloodhit`, `sparks`.
+* `test/units.mjs` checks every infected type, turned soldiers and survivors.
+
+## Survivors and 3D figures
+
+* Military survivors are drawn from the military sheet: walk cycle while moving, standing otherwise.
+* Other survivors are 3D figures: three poses (feet together, left foot forward, right foot forward)
+  alternate with the distance walked, and arms swing against the legs.
+* The abomination (and any infected drawn in 3D) bobs with each step it takes, not with the clock.
+* Vehicles, helicopters and boats are rigid 3D models: no wheel, track or rotor animation.
 
 ## Drawing and fallback
 

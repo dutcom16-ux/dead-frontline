@@ -25,6 +25,16 @@ class G implements Geo {
     this.quad(p(x0, y1, z1), p(x1, y1, z1), p(x1, y1, z0), p(x0, y1, z0), col);
     this.quad(p(x0, y0, z0), p(x1, y0, z0), p(x1, y0, z1), p(x0, y0, z1), col);
   }
+  /** a box whose bottom face is shifted by dz along z (a leg stepping forward or back) */
+  skewBox(x0: number, y0: number, z0: number, x1: number, y1: number, z1: number, dz: number, col: C3) {
+    const b = (x: number, z: number) => [x, y0, z + dz], t = (x: number, z: number) => [x, y1, z];
+    this.quad(b(x0, z1), b(x1, z1), t(x1, z1), t(x0, z1), col);
+    this.quad(b(x1, z0), b(x0, z0), t(x0, z0), t(x1, z0), col);
+    this.quad(b(x1, z1), b(x1, z0), t(x1, z0), t(x1, z1), col);
+    this.quad(b(x0, z0), b(x0, z1), t(x0, z1), t(x0, z0), col);
+    this.quad(t(x0, z1), t(x1, z1), t(x1, z0), t(x0, z0), col);
+    this.quad(b(x0, z0), b(x1, z0), b(x1, z1), b(x0, z1), col);
+  }
   cyl(cx: number, cz: number, r: number, y0: number, y1: number, sides: number, col: C3, r1 = r, cap = true) {
     for (let i = 0; i < sides; i++) {
       const a0 = (i / sides) * Math.PI * 2, a1 = ((i + 1) / sides) * Math.PI * 2;
@@ -55,17 +65,19 @@ class G implements Geo {
 
 const SKIN: C3 = [0.78, 0.6, 0.46], BOOT: C3 = [0.13, 0.12, 0.1], GUN: C3 = [0.1, 0.1, 0.11];
 
-function human(g: G, opts: { helmet?: boolean; gun?: number; hunch?: number; arms?: "gun" | "forward" | "down"; skin?: C3; pants?: C3 }) {
+function human(g: G, opts: { helmet?: boolean; gun?: number; hunch?: number; arms?: "gun" | "forward" | "down"; skin?: C3; pants?: C3; step?: number }) {
   const h = opts.hunch || 0, sk = opts.skin || SKIN, pants = opts.pants || [0.24, 0.26, 0.22];
-  g.box(-0.14, 0, -0.1, -0.03, 0.82, 0.1, pants); g.box(0.03, 0, -0.1, 0.14, 0.82, 0.1, pants);
-  g.box(-0.14, 0, -0.12, -0.03, 0.12, 0.14, BOOT); g.box(0.03, 0, -0.12, 0.14, 0.12, 0.14, BOOT);
+  // legs: `step` = -1..1 puts the left foot forward / back (the right one opposite) for walking poses
+  const st = (opts.step || 0) * 0.2;
+  g.skewBox(-0.14, 0, -0.1, -0.03, 0.82, 0.1, st, pants); g.skewBox(0.03, 0, -0.1, 0.14, 0.82, 0.1, -st, pants);
+  g.box(-0.14, 0, -0.12 + st, -0.03, 0.12, 0.14 + st, BOOT); g.box(0.03, 0, -0.12 - st, 0.14, 0.12, 0.14 - st, BOOT);
   g.box(-0.22, 0.82, -0.14 + h * 0.3, 0.22, 1.42, 0.14 + h * 0.3, W);                  // torso (tinted)
   const hy = 1.44 - h * 0.12, hz = h * 0.45;
   g.box(-0.11, hy, -0.11 + hz, 0.11, hy + 0.25, 0.11 + hz, sk);                       // head
   if (opts.helmet) g.box(-0.135, hy + 0.15, -0.135 + hz, 0.135, hy + 0.3, 0.135 + hz, W);
   if (opts.arms === "forward") { g.box(-0.3, 1.2, 0.0, -0.2, 1.3, 0.55, sk); g.box(0.2, 1.2, 0.0, 0.3, 1.3, 0.55, sk); }
   else if (opts.arms === "gun") { g.box(-0.3, 1.0, -0.05, -0.2, 1.38, 0.1, W); g.box(0.2, 1.05, 0.05, 0.3, 1.32, 0.38, W); }
-  else { g.box(-0.3, 0.88, -0.07, -0.21, 1.4, 0.07, sk); g.box(0.21, 0.88, -0.07, 0.3, 1.4, 0.07, sk); }
+  else { const sw = -st * 0.45; g.skewBox(-0.3, 0.88, -0.07, -0.21, 1.4, 0.07, sw, sk); g.skewBox(0.21, 0.88, -0.07, 0.3, 1.4, 0.07, -sw, sk); }   // arms swing against the legs
   if (opts.gun) g.box(-0.04, 1.12, 0.05, 0.04, 1.22, 0.05 + opts.gun, GUN);
 }
 
@@ -73,7 +85,7 @@ export function soldierGeo(): Geo { const g = new G(); human(g, { helmet: true, 
 export function heavyGeo(): Geo { const g = new G(); human(g, { helmet: true, gun: 1.15, arms: "gun", pants: [0.27, 0.31, 0.22] }); g.box(-0.08, 1.05, 0.3, 0.08, 1.25, 1.25, GUN); g.box(-0.24, 0.95, -0.28, 0.24, 1.38, -0.13, [0.22, 0.2, 0.16]); return g; }
 export function launcherGeo(): Geo { const g = new G(); human(g, { helmet: true, gun: 0.4, arms: "gun", pants: [0.27, 0.31, 0.22] }); g.cyl(0.16, 0.2, 0.07, 1.42, 1.5, 6, [0.25, 0.28, 0.2]); g.box(0.09, 1.38, -0.45, 0.23, 1.52, 0.75, [0.25, 0.28, 0.2]); return g; }
 export function flamerGeo(): Geo { const g = new G(); human(g, { helmet: true, gun: 0.75, arms: "gun", pants: [0.3, 0.27, 0.2] }); g.cyl(-0.1, -0.24, 0.1, 0.9, 1.45, 8, [0.55, 0.15, 0.1]); g.cyl(0.1, -0.24, 0.1, 0.9, 1.45, 8, [0.55, 0.15, 0.1]); return g; }
-export function civilianGeo(): Geo { const g = new G(); human(g, { arms: "down", pants: [0.2, 0.22, 0.32] }); return g; }
+export function civilianGeo(step = 0): Geo { const g = new G(); human(g, { arms: "down", pants: [0.2, 0.22, 0.32], step }); return g; }
 export function zombieGeo(): Geo { const g = new G(); human(g, { hunch: 0.5, arms: "forward", skin: [0.55, 0.62, 0.48], pants: [0.25, 0.22, 0.2] }); return g; }
 export function bruteGeo(): Geo {
   const g = new G(); const sk: C3 = [0.5, 0.45, 0.4];
@@ -132,7 +144,8 @@ export function heliGeo(): Geo { const g = new G(); g.box(-0.9, 0, -2.2, 0.9, 1.
 export function boatGeo(): Geo { const g = new G(); g.box(-1.6, 0, -5.5, 1.6, 1.2, 4.5, W); g.cyl(0, 4.5, 1.6, 0, 1.2, 3, W, 0.01, false); g.box(-1.0, 1.2, -3.0, 1.0, 2.6, 0.0, [0.75, 0.77, 0.72]); return g; }
 
 export const MODELS: Record<string, () => Geo> = {
-  soldier: soldierGeo, heavy: heavyGeo, launcher: launcherGeo, flamer: flamerGeo, civilian: civilianGeo,
+  soldier: soldierGeo, heavy: heavyGeo, launcher: launcherGeo, flamer: flamerGeo, civilian: () => civilianGeo(0),
+  civilian_l: () => civilianGeo(1), civilian_r: () => civilianGeo(-1),
   zombie: zombieGeo, brute: bruteGeo, bloater: bloaterGeo, crawler: crawlerGeo, abomination: abominationGeo,
   corpse: corpseGeo, blood: bloodGeo, ring: ringGeo, objmarker: markerGeo, beacon: beaconGeo, flash: flashGeo, blast: blastGeo,
   fire: fireGeo, crate: crateGeo, wreck: wreckGeo, wire: wireGeo, light: lightGeo, turret: turretGeo, antenna: antennaGeo, flag: flagGeo,

@@ -66,7 +66,14 @@ const r = await page.evaluate(async () => {
       if (!ok || !on) tipBad.push(`${d} tip (${vx.toFixed(2)}, ${vy.toFixed(2)}) on rifle ${on}`);
     }
   }
-  out.atlas = { clipBad, tipBad };
+  // one standing height for every direction (the sheet draws some directions taller)
+  const heights = D8.map((d) => {
+    const f = atlas.frames[atlas.anims["idle_" + d][0]];
+    let top = f.h;
+    for (let y = 0; y < f.h && top === f.h; y++) for (let x = 0; x < f.w; x++) if (px[((f.y + y) * cv.width + f.x + x) * 4 + 3] > 128) { top = y; break; }
+    return ((f.ay - top) * (f.k || 1)) / atlas.ref;
+  });
+  out.atlas = { clipBad, tipBad, heights };
 
   // ---------------- drawing harness: Sprites.draw on a canvas every step, game time
   const canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
@@ -129,6 +136,7 @@ const r = await page.evaluate(async () => {
 
   // ---------------- metrics over march + fight
   let changes = 0, jumps = 0, flicker = 0, wobble = 0, wobbleWalk = 0, straightChanges = 0, straightTime = 0, metres = 0, frameSteps = 0, expected = 0;
+  let walkStarts = 0, walkStartsOnStep = 0;
   let shots = 0, shotsShown = 0, flashNoShot = 0, flashLong = 0, walkWhileEngaging = 0, engagedMovingFrames = 0, fireFrames = 0;
   const flickers = [], wwe = [], straightBad = [];
   for (const [id, seq0] of log) {
@@ -149,6 +157,8 @@ const r = await page.evaluate(async () => {
       // (sniper rifles, rocket launchers and machine guns cannot fire on the move in this game: walking is right for them)
       if (b.eng && !["sniper", "rocket", "lmg"].includes(b.wid)) { if (/^walk_/.test(b.anim)) { walkWhileEngaging++; wwe.push({ id, t: +b.t.toFixed(2), wid: b.wid }); } if (b.moving) engagedMovingFrames++; }
       if (b.state === "fire") fireFrames++;
+      // a walk starts with a step (the first stride frame), not mid-cycle
+      if (/^walk_/.test(b.anim) && !/^walk_/.test(a.anim)) { walkStarts++; if (b.i === 0) walkStartsOnStep++; }
       // walk cycle advances with the distance covered
       if (/^walk_/.test(b.anim) && a.anim === b.anim) {
         const d = Math.hypot(b.x - a.x, b.y - a.y), nn = atlas.anims[b.anim].length;
@@ -166,7 +176,7 @@ const r = await page.evaluate(async () => {
     }
   }
   const flashesDrawn = sp.flashes.filter((f) => f.t >= marchFrom && f.t <= fightTo).length;
-  out.march = { changes, jumps, flicker, wobble, wobbleWalk, flickers: flickers.slice(0, 5), straightChanges, straightBad, straightTime, framesPerMetre: metres ? frameSteps / metres : 0, expectedPerMetre: metres ? expected / metres : 0, metresPerCycle: frameSteps ? metres / (frameSteps / 4) : 0 };
+  out.march = { walkStarts, walkStartsOnStep, changes, jumps, flicker, wobble, wobbleWalk, flickers: flickers.slice(0, 5), straightChanges, straightBad, straightTime, framesPerMetre: metres ? frameSteps / metres : 0, expectedPerMetre: metres ? expected / metres : 0, metresPerCycle: frameSteps ? metres / (frameSteps / 4) : 0 };
   out.fight = { wwe: wwe.slice(0, 6), shots, shotsShown, flashNoShot, flashLong, walkWhileEngaging, engagedMovingFrames, fireFrames, flashesDrawn, kills: g.stats.killed };
 
   // ---------------- one soldier, eight directions: firing, then walking
@@ -246,6 +256,8 @@ const fireWays = Object.entries(r.ways.fire), walkWays = Object.entries(r.ways.w
 const checks = [
   [r.atlas.clipBad.length === 0, `every direction has walk 4 / idle 1 / fire 3 / dying 6 frames: ${r.atlas.clipBad.join(", ") || "all 8"}`],
   [r.atlas.tipBad.length === 0, `barrel tip on the rifle and pointing the view's way in all 24 firing frames (N and S stances included): ${r.atlas.tipBad.join("; ") || "ok"}`],
+  [Math.max(...r.atlas.heights) - Math.min(...r.atlas.heights) < 0.03, `one standing height in every direction: ${r.atlas.heights.map((h) => h.toFixed(3)).join(" ")} figure heights`],
+  [M.walkStarts > 10 && M.walkStartsOnStep === M.walkStarts, `walks start with a step: ${M.walkStartsOnStep}/${M.walkStarts}`],
   [M.jumps === 0, `march: view changes go to the next view: ${M.changes} changes, ${M.jumps} skipped (${M.wobble} turned back within 1 s, ${M.wobbleWalk} of them walking)`],
   [M.flicker === 0, `march: no back-and-forth flicker within 0.25 s: ${M.flicker}`],
   [M.straightChanges === 0 && M.straightTime > 20, `march: walking straight keeps one view: ${M.straightChanges} changes over ${M.straightTime} soldier-seconds`],

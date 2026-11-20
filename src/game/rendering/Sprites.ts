@@ -27,7 +27,6 @@ import { canFireWhileMoving } from "../units/UnitAI";
 interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; k?: number; mx?: number; my?: number }
 interface Atlas { size: [number, number]; ref: number; frames: Frame[]; anims: Record<string, number[]> }
 interface Sheet { img: HTMLImageElement; atlas: Atlas; tints: Map<string, HTMLCanvasElement> }
-type Dir = "E" | "NE" | "N" | "S" | "SE";
 export type Dir8 = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
 const SECT8: Dir8[] = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
 /** compass order, clockwise from facing away from the viewer */
@@ -42,7 +41,15 @@ const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 /** dying frames per second; shot frame and recoil frame lengths (s); aim kept after a target drops (s) */
 const DIE_FPS = 10, SHOT_S = 0.06, RECOIL_S = 0.08, AIM_HOLD_S = 0.8;
 export type SoldierState = "idle" | "walk" | "fire";
-interface Anim { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number }
+/** animation state of one figure: displayed view, cycle phase, measured movement, last shot / hit */
+interface Anim { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number }
+/** the last pose an infected was drawn in (its fall starts from it) */
+interface LastPose { anim: string; i: number; flip: boolean; size: number; wide: number; tint: string; sheet: "Z" | "ZS"; view: Dir8 }
+/** metres covered by one loop of each infected clip (the loop advances with distance: no sliding) */
+const LOOP_M: Record<string, number> = { walk_SW: 1.6, walk_SW2: 1.3, walk_E: 1.0, hunch_E: 1.0, run_E: 2.6, run_E2: 2.0, run_E3: 1.6, charge_E: 2.8, crawl_E: 0.7 };
+/** turned soldier: the walk clip ramps from standing to a long stride; slow and fast step cycles */
+const ZS_SLOW = [0, 1, 2, 3, 2, 1], ZS_FAST = [1, 2, 3, 4, 3, 2], ZS_LOOP_M = 1.4;
+const FALL_S = 0.45;   // infected fall: standing pose tips over and gives way to the lying frame
 export interface SoldierPose { state: SoldierState; anim: string; i: number; bob: number; dir: Dir8; flash: boolean }
 
 export class Sprites {
@@ -51,7 +58,9 @@ export class Sprites {
   anim = new Map<number, Anim>();
   /** view each fallen soldier dies in (fixed at the moment of death) */
   deathDir = new Map<number, Dir8>();
-  flip = new Map<number, boolean>();
+  /** last pose of each infected (its fall starts from it) */
+  lastPose = new Map<number, LastPose>();
+  private pruneT = -99;
   occl = new Map<number, { t: number; v: boolean }>();
   /** recent muzzle flashes drawn (for tests): soldier, game time, offset from the feet in figure heights, view */
   flashes: { id: number; t: number; x: number; y: number; dir: Dir8 }[] = [];
@@ -101,13 +110,30 @@ export class Sprites {
     if (next === st.prevDir && now - st.dirT < 0.3) return;
     st.prevDir = st.dir; st.dir = next; st.dirT = now;
   }
-  private stateOf(u: Unit, cam: IsoCamera, heading: number, now: number): Anim {
+  private stateOf(u: { id: number; x: number; y: number }, cam: IsoCamera, heading: number, now: number): Anim {
     let st = this.anim.get(u.id);
     if (!st) {
-      st = { dir: Math.round(this.compassDeg(cam, heading) / 45) % 8, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: u.shotN, state: "idle", stateT: now };
+      st = { dir: Math.round(this.compassDeg(cam, heading) / 45) % 8, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9 };
       this.anim.set(u.id, st);
     }
     return st;
+  }
+  /** measure movement since the last frame: distance covered (returned), smoothed velocity and speed */
+  private track(st: Anim, x: number, y: number, now: number, speed?: number): number {
+    const dt = now - st.lt;
+    let moved = 0;
+    if (dt > 0 && dt < 0.5) {
+      moved = Math.min(1.5, Math.hypot(x - st.lx, y - st.ly));
+      const k = Math.min(1, dt * 4);
+      st.spd = st.spd * (1 - k) + (speed ?? moved / dt) * k;
+      st.vx = st.vx * (1 - k) + ((x - st.lx) / dt) * k; st.vy = st.vy * (1 - k) + ((y - st.ly) / dt) * k;
+      if (moved / dt > 0.3) st.mt = now;
+    }
+    st.lx = x; st.ly = y; st.lt = now;
+    return moved;
+  }
+  /** moved within the last 0.15 s: walking (a figure that stops stands at once, not mid-step) */
+  private going(st: Anim, now: number) { return now - st.mt < 0.15;
   }
   /**
    * Soldier animation state, by priority firing > walking > idle (dying is drawn from the corpse).
@@ -118,15 +144,7 @@ export class Sprites {
     const engaging = !!tgt && !tgt.dead && u.losOk && (u.mag > 0 || u.reserve > 0);
     const st = this.stateOf(u, cam, u.heading, now);
     // ground speed and velocity (smoothed) and distance covered since the last frame
-    const dt = now - st.lt;
-    let moved = 0;
-    if (dt > 0 && dt < 0.5) {
-      moved = Math.min(1.5, Math.hypot(u.x - st.lx, u.y - st.ly));
-      const k = Math.min(1, dt * 4);
-      st.spd = st.spd * (1 - k) + (u.moving ? u.speedNow : 0) * k;
-      st.vx = st.vx * (1 - k) + ((u.x - st.lx) / dt) * k; st.vy = st.vy * (1 - k) + ((u.y - st.ly) / dt) * k;
-    }
-    st.lx = u.x; st.ly = u.y; st.lt = now;
+    const moved = this.track(st, u.x, u.y, now, u.moving ? u.speedNow : 0);
     // a shot: the weapon's firing event counts it. The shot frame and flash start on the first frame
     // drawn after it, so no shot is missed at a low frame rate, and nothing is shown without one
     if (u.shotN !== st.shotN) { st.shotN = u.shotN; st.shotT = now; }
@@ -138,7 +156,10 @@ export class Sprites {
     // moving and shooting is part of the game for most weapons: those soldiers keep the firing stance
     const firing = aiming && (!moving || canFireWhileMoving(u) || sinceShot < SHOT_S + RECOIL_S);
     const state: SoldierState = firing ? "fire" : moving ? "walk" : "idle";
-    if (state !== st.state) { st.state = state; st.stateT = now; }
+    if (state !== st.state) {
+      if (state === "walk") st.phase = 0;   // a walk starts with a step (stride frame), not mid-cycle
+      st.state = state; st.stateT = now;
+    }
     // ---- view: the rifle toward the target when firing; walking, the way he really goes (his heading
     // can lag behind or stay on a target he cannot shoot on the move); otherwise the way he faces
     const going = Math.hypot(st.vx, st.vy) > 0.8 ? Math.atan2(st.vy, st.vx) : u.heading;
@@ -162,14 +183,69 @@ export class Sprites {
     const ph = (u.id % 7) * 0.9;
     return { state, anim: "idle_" + d, i: 0, bob: Math.sin((now + ph) * 2.1) * human * 0.005, dir: d, flash: false };
   }
-  /** a soldier who turned: 8-direction infected soldier */
-  zpose8(g: Game, z: Zombie, cam: IsoCamera, now: number): { anim: string; i: number } {
-    const ph = (z.id % 11) * 0.29;
+  /** a military survivor (drawn as a soldier): the soldier's walk cycle while moving, standing otherwise */
+  civPose(c: Civilian, cam: IsoCamera, now: number): { anim: string; i: number } {
+    const st = this.stateOf(c, cam, c.heading, now);
+    const moved = this.track(st, c.x, c.y, now);
+    const moving = this.going(st, now);
+    this.turnTo(st, cam, moving && Math.hypot(st.vx, st.vy) > 0.3 ? Math.atan2(st.vy, st.vx) : c.heading, now, moving ? 0.12 : 0.25);
+    const d = COMPASS[st.dir];
+    if (!moving) return { anim: "idle_" + d, i: 0 };
+    st.phase += moved / (1.4 + 0.25 * st.spd);
+    const n = this.mil!.atlas.anims["walk_" + d].length;
+    return { anim: "walk_" + d, i: Math.floor(st.phase * n) % n };
+  }
+  /** forget the animation state of figures that are gone (every few seconds) */
+  private prune(g: Game, now: number) {
+    if (now - this.pruneT < 3) return;
+    this.pruneT = now;
+    const keep = new Set<number>();
+    for (const u of g.units) if (u.alive) keep.add(u.id);
+    for (const z of g.zombies) if (!z.dead) keep.add(z.id);
+    for (const c of g.civs) if (!c.dead) keep.add(c.id);
+    for (const c of g.corpses) if (c.uid !== undefined && g.time - c.t < 3) keep.add(c.uid);
+    for (const m of [this.anim, this.lastPose, this.occl] as Map<number, unknown>[]) for (const id of m.keys()) if (!keep.has(id)) m.delete(id);
+  }
+  /**
+   * A soldier who turned (8-direction infected soldier sheet). Faces the way he really moves (or his
+   * victim), turns one view at a time; the step cycle advances with distance; the grab lands on the
+   * frame of the real hit.
+   */
+  zpose8(g: Game, z: Zombie, cam: IsoCamera, now: number): { anim: string; i: number; view: Dir8 } {
+    const st = this.stateOf(z, cam, z.heading, now);
+    const moved = this.track(st, z.x, z.y, now);
     const t = g.get(z.target);
-    if (z.state === "attack" && t) return { anim: "z_attack_" + this.dir8(cam, Math.atan2(t.y - z.y, t.x - z.x)), i: (now + ph) * 4 };
-    const d = this.dir8(cam, z.heading);
-    if (z.state === "chase" || z.state === "investigate" || z.state === "wander") return { anim: "z_walk_" + d, i: STRIDE[Math.floor((now + ph) * (z.state === "chase" ? 7 : 5)) % STRIDE.length] };
-    return { anim: "z_walk_" + d, i: 0 };
+    const hit = this.hitEvent(st, z, now);
+    const attacking = z.state === "attack" && !!t && !t.dead;
+    const moving = this.going(st, now) && !attacking;
+    const face = attacking ? Math.atan2(t!.y - z.y, t!.x - z.x) : moving && Math.hypot(st.vx, st.vy) > 0.3 ? Math.atan2(st.vy, st.vx) : z.heading;
+    this.turnTo(st, cam, face, now, attacking || moving ? 0.15 : 0.3);
+    const d = COMPASS[st.dir];
+    if (attacking || now - st.hitT < 0.4) return { anim: "z_attack_" + d, i: this.attackFrame(st, z, now, 2, hit), view: d };
+    if (moving) {
+      st.phase += moved / ZS_LOOP_M;
+      const cyc = st.spd > 1.3 ? ZS_FAST : ZS_SLOW;
+      return { anim: "z_walk_" + d, i: cyc[Math.floor(st.phase * cyc.length) % cyc.length], view: d };
+    }
+    return { anim: "z_walk_" + d, i: 0, view: d };
+  }
+  /** a hit landed since the last frame? (the infected's attack timer restarts on each hit) */
+  private hitEvent(st: Anim, z: Zombie, now: number): boolean {
+    const hit = z.attackT > st.atk + 0.05;
+    st.atk = z.attackT;
+    if (hit) st.hitT = now;
+    return hit;
+  }
+  /**
+   * Attack frame, for a clip ordered from the ready pose to the full reach: the full reach on the hit,
+   * back to ready over 0.3 s, held, then the wind-up over the last 0.35 s before the next hit is due.
+   */
+  private attackFrame(st: Anim, z: Zombie, now: number, n: number, _hit: boolean): number {
+    const since = now - st.hitT;
+    if (since < 0.12) return n - 1;
+    if (since < 0.42) return Math.max(0, Math.round((n - 1) * (1 - (since - 0.12) / 0.3)));
+    if (z.attackT < 0.35) return Math.min(n - 2, Math.floor((1 - Math.max(0, z.attackT) / 0.35) * (n - 1)));
+    return 0;
   }
   /** a copy of a sheet with a colour wash (made once, on first use) */
   private tinted(sh: Sheet, key: string): CanvasImageSource {
@@ -189,14 +265,24 @@ export class Sprites {
     return sh.atlas.frames[ids[((Math.floor(i) % ids.length) + ids.length) % ids.length]];
   }
   /** draw a frame with its anchor (the feet) at (sx, sy); `h` = standing figure height in screen px */
-  private blit(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sh: Sheet, f: Frame, sx: number, sy: number, h: number, flip: boolean, wide = 1) {
-    const k = (h / sh.atlas.ref) * (f.k || 1), kx = k * wide;
-    const w = f.w * kx, hh = f.h * k;
+  private blit(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sh: Sheet, f: Frame, sx: number, sy: number, h: number, flip: boolean, wide = 1, tall = 1) {
+    const k = (h / sh.atlas.ref) * (f.k || 1), kx = k * wide, ky = k * tall;   // `tall` scales from the feet
+    const w = f.w * kx, hh = f.h * ky;
     if (flip) {
       ctx.save(); ctx.translate(sx, 0); ctx.scale(-1, 1);
-      ctx.drawImage(src, f.x, f.y, f.w, f.h, -f.ax * kx, sy - f.ay * k, w, hh);
+      ctx.drawImage(src, f.x, f.y, f.w, f.h, -f.ax * kx, sy - f.ay * ky, w, hh);
       ctx.restore();
-    } else ctx.drawImage(src, f.x, f.y, f.w, f.h, sx - f.ax * kx, sy - f.ay * k, w, hh);
+    } else ctx.drawImage(src, f.x, f.y, f.w, f.h, sx - f.ax * kx, sy - f.ay * ky, w, hh);
+  }
+  /**
+   * A standing frame tipping over about its feet (angle in radians, + = falling to screen-right). The
+   * feet slide back as it goes, so that the body ends lying where the lying frame (centred on the
+   * same spot) takes over: one body, not two.
+   */
+  private blitFall(ctx: CanvasRenderingContext2D, src: CanvasImageSource, sh: Sheet, f: Frame, sx: number, sy: number, h: number, flip: boolean, wide: number, ang: number) {
+    ctx.save(); ctx.translate(sx - Math.sin(ang) * h * 0.45, sy); ctx.rotate(ang);
+    this.blit(ctx, src, sh, f, 0, 0, h, flip, wide);
+    ctx.restore();
   }
   /** screen-space direction of a map heading: x>0 screen-right, y>0 up-screen (away from the viewer) */
   facing(cam: IsoCamera, heading: number): [number, number] {
@@ -204,36 +290,64 @@ export class Sprites {
     const [rx, ry] = cam.right, [ux, uy] = cam.forward;
     return [fx * rx + fy * ry, fx * ux + fy * uy];
   }
-  /** eight screen directions folded onto the five drawn ones (west = mirrored east) */
-  dir(cam: IsoCamera, heading: number, id: number): { d: Dir; flip: boolean } {
-    const [sx, sy] = this.facing(cam, heading);
-    const sector = ((Math.round(Math.atan2(sy, sx) / (Math.PI / 4)) % 8) + 8) % 8; // 0 E, 1 NE, 2 N, 3 NW, 4 W, 5 SW, 6 S, 7 SE
-    let flip = sx < -0.05 ? true : sx > 0.05 ? false : this.flip.get(id) ?? false;
-    this.flip.set(id, flip);
-    const d: Dir = sector === 0 || sector === 4 ? "E" : sector === 1 || sector === 3 ? "NE" : sector === 2 ? "N" : sector === 6 ? "S" : "SE";
-    return { d, flip };
-  }
-
-  /** infected pose */
-  zpose(g: Game, z: Zombie, cam: IsoCamera, now: number): { anim: string; i: number; flip: boolean; bob: number } {
-    const ph = (z.id % 11) * 0.29;
+  /**
+   * Infected pose. The sheet has these views: facing the viewer at three-quarters to the left
+   * (walk_SW*), side on to the right (walk_E, hunch_E, run_*, charge_E, crawl_E) and from behind
+   * (back_N). Eight screen views are steadied as for soldiers, then drawn with the nearest view:
+   * S and SW the three-quarter clip, SE that clip mirrored, E and NE the side clip, W and NW mirrored,
+   * N from behind (alternately mirrored, which swaps the legs, one step at a time).
+   * Moving: the loop advances with the distance covered. Standing: one fixed frame (the frames of a
+   * row are different people) with slow breathing. Attacking: ready, wind-up, full reach on the hit.
+   */
+  zpose(g: Game, z: Zombie, cam: IsoCamera, now: number): { anim: string; i: number; flip: boolean; bob: number; sy: number; view: Dir8 } {
+    const st = this.stateOf(z, cam, z.heading, now);
+    const moved = this.track(st, z.x, z.y, now);
     const t = g.get(z.target);
-    const head = z.state === "attack" && t ? Math.atan2(t.y - z.y, t.x - z.x) : z.heading;
-    const { d, flip } = this.dir(cam, head, z.id);
-    const out = (anim: string, i: number, bob = 0) => ({ anim, i, flip, bob });
-    const moving = Math.hypot(z.x - z.lastX, z.y - z.lastY) > 0.02 || z.state === "chase" || z.state === "investigate" || z.state === "wander";
-    if (z.type === "crawler") return out(z.state === "attack" ? "crawl_E" : "crawl_E", moving ? (now + ph) * 6 : 0);
-    if (z.state === "attack") return out("attack_E", (now + ph) * 9);
-    if (z.state === "idle" || !moving) {
-      if (d === "N") return out("back_N", z.id % 2);
-      return out(z.id % 2 ? "idle_S2" : "idle_S", (now + ph) * 3);
+    const hit = this.hitEvent(st, z, now);
+    const attacking = (z.state === "attack" && !!t && !t.dead) || now - st.hitT < 0.4;
+    const moving = this.going(st, now) && !attacking;
+    const face = attacking && t ? Math.atan2(t.y - z.y, t.x - z.x) : moving && Math.hypot(st.vx, st.vy) > 0.2 ? Math.atan2(st.vy, st.vx) : z.heading;
+    this.turnTo(st, cam, face, now, attacking || moving ? 0.15 : 0.3);
+    const d = COMPASS[st.dir];
+    const side = d === "E" || d === "NE" || d === "W" || d === "NW";
+    const left = d === "W" || d === "NW" || d === "SE";   // drawn mirrored
+    const rig = z.id % 2;
+    const out = (anim: string, i: number, flip = left, sy = 1) => ({ anim, i, flip, bob: 0, sy, view: d });
+    const advance = (anim: string) => { st.phase += moved / (LOOP_M[anim] || 1.2); return Math.floor(st.phase * this.zombies!.atlas.anims[anim].length); };
+    if (z.type === "crawler") {
+      if (attacking) {          // no attack frames: the crawl frames from the least to the most outstretched arm
+        const [sx] = t ? this.facing(cam, Math.atan2(t.y - z.y, t.x - z.x)) : [left ? -1 : 1];
+        if (Math.abs(sx) > 0.15) st.flip = sx < 0;
+        return out("crawl_attack_E", this.attackFrame(st, z, now, this.zombies!.atlas.anims.crawl_attack_E.length, hit), st.flip);
+      }
+      if (side || d === "SW" || d === "SE") st.flip = left; // facing views; N and S keep the last side
+      return out("crawl_E", moving ? advance("crawl_E") : 0, st.flip);
     }
-    const fast = z.state === "chase" && z.def.run > 3;
-    if (d === "N") return out("back_N", (now + ph) * (fast ? 6 : 3), Math.abs(Math.sin((now + ph) * (fast ? 9 : 5))) * 2);
-    if (d === "S" || d === "SE") return out(["walk_S", "walk_S2", "walk_S3"][z.id % 3], (now + ph) * (fast ? 14 : z.state === "chase" ? 9 : 6));
-    if (z.type === "mutant" && z.state === "chase") return out("charge_E", (now + ph) * 12);
-    if (fast) return out(["run_E", "run_E2", "run_E3"][z.id % 3], (now + ph) * 12);
-    return out(z.id % 2 ? "hunch_E" : "walk_E", (now + ph) * (z.state === "chase" ? 8 : 5));
+    if (attacking) {
+      const fast = z.def.run > 3;
+      const anim = fast ? "attack_E" : rig ? "claw_E" : "lunge_E";
+      // the attack frames are side views: mirrored when the victim is to the left on screen
+      const [sx] = t ? this.facing(cam, Math.atan2(t.y - z.y, t.x - z.x)) : [left ? -1 : 1];
+      if (Math.abs(sx) > 0.15) st.flip = sx < 0;
+      return out(anim, this.attackFrame(st, z, now, this.zombies!.atlas.anims[anim].length, hit), st.flip);
+    }
+    if (!moving) {
+      const sy = 1 + Math.sin(now * 1.6 + z.id * 1.7) * 0.012;      // breathing (scaled from the feet: they stay put)
+      if (d === "N" || d === "NE" || d === "NW") return out("back_N", z.id % 2, z.id % 3 === 0, sy);
+      if (side) return out(rig ? "hunch_E" : "walk_E", 0, left, sy);
+      return out(z.id % 3 ? "idle_S" : "idle_S2", z.id % 6, false, sy);
+    }
+    if (d === "N") {
+      st.phase += moved / 0.55;                                       // one step every 0.55 m
+      return out("back_N", z.id % 2, Math.floor(st.phase) % 2 === 1);
+    }
+    const run = st.spd > 2.4;
+    if (side) {
+      const anim = z.type === "mutant" && run ? "charge_E" : run ? ["run_E", "run_E2", "run_E3"][z.id % 3] : rig ? "hunch_E" : "walk_E";
+      return out(anim, advance(anim));
+    }
+    const anim = rig ? "walk_SW2" : "walk_SW";
+    return out(anim, advance(anim));
   }
 
   /** a building between the figure and the camera? (cached about four times a second) */
@@ -259,6 +373,7 @@ export class Sprites {
     const on = (s: [number, number] | null, pad = 80) => !!s && s[0] > -pad && s[1] > -pad && s[0] < W + pad && s[1] < H + pad;
     ctx.imageSmoothingEnabled = human < 90;
     const M = this.mil, Z = this.zombies, ZS = this.zs, FX = this.fx;
+    this.prune(g, now);
     // ---- bodies (piles stack because each corpse lies on top of the ones already there)
     const bodies: { y: number; d: () => void }[] = [];
     for (const c of g.corpses) {
@@ -266,7 +381,10 @@ export class Sprites {
       const s = bf.screen(c.x, c.y, c.z);
       if (!on(s)) continue;
       if (c.soldier && ZS) {
-        const f = this.frame(ZS, "z_die_" + this.dir8(cam, c.rot), Math.min(2, (g.time - c.t) * 6));
+        // the fall plays once (6 fps, game time) in the view he was last shown in; the last frame stays
+        const lp = c.uid !== undefined ? this.lastPose.get(c.uid) : undefined;
+        const view = lp ? lp.view : this.dir8(cam, c.rot);
+        const f = this.frame(ZS, "z_die_" + view, Math.min(2, Math.max(0, g.time - c.t) * 6));
         if (f) bodies.push({ y: s![1], d: () => this.blit(ctx, ZS.img, ZS, f, s![0], s![1], human, false) });
       } else if ((c.kind === "soldier" || c.sprite) && M) {
         // dying: the fall plays once from the moment of death, in the view he was last shown in, and
@@ -275,9 +393,25 @@ export class Sprites {
         const f = this.frame(M, p.anim, p.i);
         if (f) bodies.push({ y: s![1], d: () => this.blit(ctx, M.img, M, f, s![0], s![1], human, false) });
       } else if (Z) {
-        const f = this.frame(Z, c.kind === "crawler" ? "crawl_E" : "dead", c.kind === "crawler" ? 3 : (c.id || 0) % 3);
+        // the infected sheet has no falling frames: the last standing pose tips over and gives way to a
+        // lying frame (facing the same side) within FALL_S
+        const lp = c.uid !== undefined ? this.lastPose.get(c.uid) : undefined;
+        const flip = lp ? lp.flip : !!c.flip;
+        const f = this.frame(Z, "dead", (c.id || 0) % 2);
         const tint = TINTS[c.kind || ""] ? this.tinted(Z, c.kind!) : Z.img;
-        if (f) bodies.push({ y: s![1], d: () => this.blit(ctx, tint, Z, f, s![0], s![1], human * Math.min(1.5, c.s || 1), !!c.flip, c.kind === "bloater" ? 1.2 : 1) });
+        const size = human * Math.min(1.5, c.s || 1), wide = c.kind === "bloater" ? 1.2 : 1;
+        const age = Math.max(0, g.time - c.t);
+        const lf = lp && age < FALL_S ? this.frame(Z, lp.anim, lp.i) : null;
+        if (f) bodies.push({ y: s![1], d: () => {
+          if (lf && lp) {
+            const p = age / FALL_S;
+            ctx.globalAlpha = 0.92 * (1 - Math.max(0, (p - 0.75) / 0.25));
+            this.blitFall(ctx, lp.tint === "" ? Z.img : this.tinted(Z, lp.tint), Z, lf, s![0], s![1], lp.size, lp.flip, lp.wide, (lp.flip ? 1 : -1) * p * p * 1.5);
+            ctx.globalAlpha = 0.92 * Math.min(1, Math.max(0, (p - 0.7) / 0.3));
+          }
+          this.blit(ctx, tint, Z, f, s![0], s![1], size, flip, wide);
+          ctx.globalAlpha = 0.92;
+        } });
       }
     }
     bodies.sort((a, b) => a.y - b.y);
@@ -314,7 +448,8 @@ export class Sprites {
       if (!c.military || c.dead || c.state === "gone") continue;
       const s = bf.screen(c.x, c.y, c.z);
       if (!on(s)) continue;
-      const f = this.frame(M, "idle_" + this.dir8(cam, c.heading), 0);
+      const p = this.civPose(c, cam, now);
+      const f = this.frame(M, p.anim, p.i);
       if (f) list.push({ y: s![1], d: () => { ctx.globalAlpha = 0.85; this.blit(ctx, M.img, M, f, s![0], s![1], human, false); } });
     }
     for (const z of g.zombies) {
@@ -325,6 +460,7 @@ export class Sprites {
         const p = this.zpose8(g, z, cam, now);
         const f = this.frame(ZS, p.anim, p.i);
         if (!f) continue;
+        this.lastPose.set(z.id, { anim: p.anim, i: p.i, flip: false, size: human, wide: 1, tint: "", sheet: "ZS", view: p.view });
         const occ = this.occluded(bf, cam, z.id, z.x, z.y, z.z, now);
         list.push({ y: s![1], d: () => {
           ctx.globalAlpha = occ ? 0.4 : 1;
@@ -342,12 +478,14 @@ export class Sprites {
       if (!f) continue;
       const src = TINTS[z.type] ? this.tinted(Z, z.type) : Z.img;
       const size = Math.min(1.6, z.def.size);
+      const hz = human * size * (z.type === "crawler" ? 1.15 : 1), wz = z.type === "bloater" ? 1.25 : 1;
+      this.lastPose.set(z.id, { anim: p.anim, i: p.i, flip: p.flip, size: hz, wide: wz, tint: TINTS[z.type] ? z.type : "", sheet: "Z", view: p.view });
       const occ = this.occluded(bf, cam, z.id, z.x, z.y, z.z, now);
       list.push({ y: s![1], d: () => {
         ctx.globalAlpha = occ ? 0.4 : 1;
         if (z.hitT > 0) ctx.filter = "brightness(1.7)";
         else if (z.burnT > 0) ctx.filter = "sepia(1) saturate(3) hue-rotate(-20deg)";
-        this.blit(ctx, src, sh, f, s![0], s![1] - p.bob, human * size * (z.type === "crawler" ? 1.15 : 1), p.flip, z.type === "bloater" ? 1.25 : 1);
+        this.blit(ctx, src, sh, f, s![0], s![1] - p.bob, hz, p.flip, wz, p.sy);
         ctx.filter = "none";
       } });
     }

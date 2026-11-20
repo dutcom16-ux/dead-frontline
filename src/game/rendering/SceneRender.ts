@@ -27,6 +27,22 @@ export class SceneRender {
     this.bf = bf; this.overlay = overlay; this.ctx = overlay.getContext("2d")!;
     for (const [k, fn] of Object.entries(MODELS)) bf.world.defineInstanced("m_" + k, fn());
   }
+  /** step tracking for 3D figures: distance walked in steps of `stepM` metres, smoothed speed */
+  strides = new Map<number, { lx: number; ly: number; lt: number; ph: number; spd: number; mt: number }>();
+  private stride(id: number, x: number, y: number, now: number, stepM: number): number {
+    let s = this.strides.get(id);
+    if (!s) { s = { lx: x, ly: y, lt: now, ph: 0, spd: 0, mt: -9 }; this.strides.set(id, s); }
+    const dt = now - s.lt;
+    if (dt > 0 && dt < 0.5) {
+      const d = Math.min(1.5, Math.hypot(x - s.lx, y - s.ly));
+      s.ph += d / stepM;
+      s.spd += (d / dt - s.spd) * Math.min(1, dt * 4);
+      if (d / dt > 0.3) s.mt = now;
+    }
+    if (dt !== 0) { s.lx = x; s.ly = y; s.lt = now; }
+    if (this.strides.size > 2000) this.strides.clear();
+    return s.ph;
+  }
   private put(model: string, x: number, y: number, z: number, rot: number, col: number[], s = 1) {
     let l = this.lists.get(model);
     if (!l) this.lists.set(model, (l = []));
@@ -63,8 +79,12 @@ export class SceneRender {
         if (z.dead || !vis(z.x, z.y)) continue;
         const k = z.hitT > 0 ? 1.7 : 1, b = z.burnT > 0;
         const col = b ? [0.9, 0.45, 0.15] : z.def.color.map((c) => c * k);
-        const bob = z.state === "chase" ? Math.sin(T * 9 + z.id) * 0.06 : 0;
-        if (!this.sprites.coversZombie(z)) this.put("m_" + (UNIT_MODEL[z.type] || "zombie"), z.x, z.y, z.z + bob, rotFor(z.heading), col, z.def.size);
+        // 3D infected (the abomination, or all if the sheet is missing): a heavy step bob that follows
+        // the distance walked, not the clock (no bobbing in place)
+        if (!this.sprites.coversZombie(z)) {
+          const bob = Math.abs(Math.sin(this.stride(z.id, z.x, z.y, time, 1.1 * z.def.size) * Math.PI)) * 0.05 * z.def.size;
+          this.put("m_" + (UNIT_MODEL[z.type] || "zombie"), z.x, z.y, z.z + bob, rotFor(z.heading), col, z.def.size);
+        }
         if (b) this.put("m_fire", z.x, z.y, z.z, T * 4 + z.id, [1.4, 0.6, 0.15], 0.5 * z.def.size);
         if (ui.hover === z.id || focusIds.has(z.id)) this.put("m_ring", z.x, z.y, z.z, 0, C.focus, z.def.size * 1.1);
       }
@@ -78,7 +98,13 @@ export class SceneRender {
       // ---- survivors
       for (const c of g.civs) {
         if (c.dead || c.state === "gone" || !vis(c.x, c.y)) continue;
-        if (!(c.military && this.sprites.ready)) this.put(c.military ? "m_soldier" : "m_civilian", c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
+        if (!(c.military && this.sprites.ready)) {
+          // survivors step as they walk: left foot forward, together, right foot forward, together (1.3 m)
+          const ph = this.stride(c.id, c.x, c.y, time, 0.65), q = ph - Math.floor(ph);
+          const moving = time - (this.strides.get(c.id)?.mt ?? -9) < 0.15;   // feet together as soon as he stops
+          const m = c.military ? "m_soldier" : !moving ? "m_civilian" : q < 0.25 || q >= 0.75 ? "m_civilian" : Math.floor(ph) % 2 ? "m_civilian_r" : "m_civilian_l";
+          this.put(m, c.x, c.y, c.z, rotFor(c.heading), c.color, 1);
+        }
         if (c.state === "hiding") this.put("m_beacon", c.x, c.y, c.z + 2.6 + Math.sin(T * 3 + c.id) * 0.15, T * 2, [0.3, 0.75, 1.0], 0.35);
       }
       for (const c of g.corpses) if (vis(c.x, c.y) && !this.sprites.coversCorpse(c)) this.put(c.model === "abomination" ? "m_abomination" : "m_corpse", c.x, c.y, c.z + (c.model === "abomination" ? -0.6 : 0), c.rot, c.col, c.s);
