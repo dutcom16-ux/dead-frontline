@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>DEAD FRONTLINE: FOB WARFARE</title>
+<meta name="description" content="Browser 2.5D real-time strategy: retake Toledo City, Cebu, street by street, then build the task force's only Forward Operating Base.">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; media-src 'self' blob:">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#11150f">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="stylesheet" href="/styles/main.css">
+</head>
+<body>
+<canvas id="gl" aria-label="Battlefield"></canvas>
+<canvas id="overlay"></canvas>
+
+<div id="hud" hidden>
+  <header id="topbar">
+    <div class="mission"><b id="mname">Mission 01</b><span id="mtime">0:00</span></div>
+    <div class="stats"><span title="Infected killed">☠ <b id="skills">0</b></span><span title="Survivors evacuated">⛑ <b id="srescued">0</b></span><span title="Soldiers in the field">⚑ <b id="sunits">0</b></span><span id="territory" class="terr yellow" title="Toledo City status">CONTESTED</span></div>
+    <div class="ctl">
+      <button id="bLog" title="Logistics (L)">Logistics</button>
+      <button id="bFob" title="FOB (O)" hidden>FOB</button>
+      <span class="speed"><button data-speed="1">1×</button><button data-speed="2">2×</button><button data-speed="3">3×</button></span>
+      <button id="bPause" title="Pause menu (Esc)">❚❚</button>
+    </div>
+  </header>
+  <section id="objectives" aria-label="Objectives"><h3>Objectives <button id="objToggle" class="mini">–</button></h3><ol id="objList"></ol></section>
+  <section id="radio" aria-live="polite"></section>
+  <div id="minimapWrap"><canvas id="minimap" width="220" height="220"></canvas><div class="mmlegend"><i class="r"></i>infected <i class="y"></i>contested <i class="g"></i>secured <i class="b"></i>FOB</div></div>
+  <div id="bossbar" hidden><span>ABOMINATION</span><div><i id="bossfill"></i></div></div>
+  <div id="modeHint" hidden></div>
+  <footer id="bottom">
+    <div id="selection"></div>
+    <div id="commands"></div>
+  </footer>
+  <aside id="panel" hidden><header><b id="panelTitle"></b><button id="panelClose" class="mini">✕</button></header><div id="panelBody"></div></aside>
+  <div id="toast" role="status"></div>
+  <div id="touchbar"><button id="tBox" title="Box select">▭ Box</button><button id="tRotL">⟲</button><button id="tRotR">⟳</button><button id="tAll">All</button></div>
+</div>
+
+<div id="screens">
+  <section id="loading" class="screen">
+    <h1>DEAD FRONTLINE<small>FOB WARFARE</small></h1>
+    <div class="bar"><i id="loadFill"></i></div>
+    <p id="loadMsg">Starting…</p>
+    <p class="fine">Toledo City, Cebu — map data © OpenStreetMap contributors (ODbL) and Overture Maps / AI-detected footprints (ODbL)</p>
+  </section>
+
+  <section id="menu" class="screen" hidden>
+    <h1>DEAD FRONTLINE<small>FOB WARFARE</small></h1>
+    <p class="tag">Philippines, day 19 of the outbreak. Retake the islands one city at a time.</p>
+    <nav class="menu">
+      <button id="mContinue" hidden>Continue</button>
+      <button id="mNew">Start Operation Reclamation</button>
+      <button id="mLoad">Load game</button>
+      <button id="mSettings">Settings</button>
+      <button id="mAbout">About &amp; map data</button>
+    </nav>
+    <p class="fine" id="storageNote"></p>
+    <p class="fine" id="offlineNote"></p>
+    <button id="mInstall" class="ghostbtn" hidden>Install app</button>
+  </section>
+
+  <section id="difficulty" class="screen" hidden>
+    <h2>New campaign — Operation Reclamation</h2>
+    <p>Choose the infection level. It sets how many infected are in Toledo and how hard they hit.</p>
+    <nav class="menu">
+      <button data-diff="low">Low infection<small>~160 infected · forgiving</small></button>
+      <button data-diff="medium">Medium infection<small>~300 infected · intended</small></button>
+      <button data-diff="high">High infection<small>~520 infected · brutal</small></button>
+      <button class="back">Back</button>
+    </nav>
+  </section>
+
+  <section id="campaign" class="screen wide" hidden>
+    <h2>Operation Reclamation — strategic map</h2>
+    <div class="campaignGrid">
+      <canvas id="campMap" width="560" height="640"></canvas>
+      <div id="campSide"></div>
+    </div>
+    <nav class="row"><button id="cMenu" class="back">Main menu</button><button id="cSave">Save</button></nav>
+  </section>
+
+  <section id="briefing" class="screen wide" hidden>
+    <h2 id="bTitle"></h2>
+    <div class="briefGrid">
+      <div><div id="bText"></div><h4>Intelligence</h4><ul id="bIntel"></ul><h4>Logistics</h4><p id="bLogi"></p></div>
+      <div><canvas id="bMap" width="360" height="360"></canvas><h4>Task force</h4><ul id="bSquad" class="squad"></ul></div>
+    </div>
+    <details class="help"><summary>Controls</summary><div id="bHelp"></div></details>
+    <nav class="row"><button class="back" id="bBack">Back</button><button id="bDeploy" class="primary">Deploy to Toledo</button></nav>
+  </section>
+
+  <section id="pause" class="screen" hidden>
+    <h2>Paused</h2>
+    <nav class="menu">
+      <button id="pResume">Resume</button>
+      <button id="pSave">Save game</button>
+      <button id="pLoad">Load game</button>
+      <button id="pSettings">Settings</button>
+      <button id="pHelp">Controls</button>
+      <button id="pQuit">Quit to main menu</button>
+    </nav>
+  </section>
+
+  <section id="saves" class="screen" hidden>
+    <h2 id="savesTitle">Save game</h2>
+    <div id="slotList"></div>
+    <p class="fine" id="savesNote"></p>
+    <nav class="row"><button class="back" id="savesBack">Back</button></nav>
+  </section>
+
+  <section id="settings" class="screen" hidden>
+    <h2>Settings</h2>
+    <div class="form">
+      <label>Graphics quality <select id="sQuality"><option value="low">Low (phones)</option><option value="medium">Medium</option><option value="high">High</option></select></label>
+      <label>Sound volume <input id="sVolume" type="range" min="0" max="1" step="0.05"></label>
+      <label>Ambient wind <input id="sAmbient" type="range" min="0" max="1" step="0.05"></label>
+      <label><input id="sEdge" type="checkbox"> Edge scrolling (mouse)</label>
+      <label><input id="sPaths" type="checkbox"> Show paths of selected units</label>
+      <label><input id="sFps" type="checkbox"> Show frame rate</label>
+      <label>Interface size <select id="sUi"><option value="0.9">Small</option><option value="1">Normal</option><option value="1.15">Large</option></select></label>
+    </div>
+    <nav class="row"><button class="back" id="settingsBack">Done</button></nav>
+  </section>
+
+  <section id="help" class="screen" hidden>
+    <h2>Controls</h2>
+    <div id="helpBody"></div>
+    <nav class="row"><button class="back" id="helpBack">Back</button></nav>
+  </section>
+
+  <section id="debrief" class="screen wide" hidden>
+    <h2 id="dTitle">Debrief</h2>
+    <div id="dBody"></div>
+    <nav class="row"><button id="dContinue" class="primary">Continue to strategic map</button></nav>
+  </section>
+
+  <section id="about" class="screen wide" hidden>
+    <h2>About &amp; map data</h2>
+    <div id="aboutBody"></div>
+    <nav class="row"><button class="back" id="aboutBack">Back</button></nav>
+  </section>
+
+  <section id="fatal" class="screen" hidden><h2>Can't start</h2><p id="fatalMsg"></p></section>
+</div>
+<div id="fps" hidden></div>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>

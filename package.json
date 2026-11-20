@@ -1,0 +1,24 @@
+{
+  "name": "dead-frontline",
+  "version": "0.1.0",
+  "private": true,
+  "description": "DEAD FRONTLINE: FOB WARFARE \u2014 browser 2.5D RTS on the real Toledo City, Cebu",
+  "type": "module",
+  "scripts": {
+    "dev": "node tools/dev.mjs",
+    "build": "node tools/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/playthrough.test.mjs dist low",
+    "test:medium": "node test/playthrough.test.mjs dist medium",
+    "test:systems": "node test/systems.mjs",
+    "test:mobile": "node test/mobile.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0",
+    "typescript": "^5.6.0"
+  },
+  "optionalDependencies": {},
+  "engines": {
+    "node": ">=18"
+  }
+}

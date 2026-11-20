@@ -1,0 +1,32 @@
+{
+ "name": "DEAD FRONTLINE: FOB WARFARE",
+ "short_name": "Dead Frontline",
+ "description": "2.5D RTS: retake Toledo City, Cebu, and build the task force's only FOB.",
+ "start_url": "./",
+ "scope": "./",
+ "display": "fullscreen",
+ "orientation": "landscape",
+ "background_color": "#0c0f0b",
+ "theme_color": "#11150f",
+ "icons": [
+  {
+   "src": "icons/icon-192.png",
+   "sizes": "192x192",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/icon-512.png",
+   "sizes": "512x512",
+   "type": "image/png"
+  },
+  {
+   "src": "icons/maskable-512.png",
+   "sizes": "512x512",
+   "type": "image/png",
+   "purpose": "maskable"
+  }
+ ],
+ "categories": [
+  "games"
+ ]
+}

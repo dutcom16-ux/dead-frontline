@@ -1,0 +1,13 @@
+{
+  "_about": "Infantry definitions. speed m/s, hp, armor = share of damage absorbed, sight m, suppressionResist 0-1. Weapon ids refer to weapons.json.",
+  "rifleman":       { "name": "Rifleman",             "hp": 100, "armor": 0.20, "speed": 3.6, "sight": 48, "suppressionResist": 0.50, "weapon": "rifle",    "color": [0.33, 0.42, 0.26], "role": "line" },
+  "assault":        { "name": "Assault Soldier",      "hp": 110, "armor": 0.25, "speed": 4.0, "sight": 42, "suppressionResist": 0.55, "weapon": "carbine",  "color": [0.30, 0.38, 0.24], "role": "line" },
+  "sniper":         { "name": "Sniper",               "hp": 80,  "armor": 0.10, "speed": 3.4, "sight": 75, "suppressionResist": 0.60, "weapon": "sniper",   "color": [0.42, 0.40, 0.26], "role": "support" },
+  "machine_gunner": { "name": "Machine Gunner",       "hp": 120, "armor": 0.25, "speed": 3.0, "sight": 48, "suppressionResist": 0.65, "weapon": "lmg",      "color": [0.28, 0.34, 0.22], "role": "support" },
+  "shotgunner":     { "name": "Shotgun Specialist",   "hp": 110, "armor": 0.25, "speed": 3.7, "sight": 36, "suppressionResist": 0.60, "weapon": "shotgun",  "color": [0.36, 0.33, 0.24], "role": "close" },
+  "flamethrower":   { "name": "Flamethrower Specialist", "hp": 125, "armor": 0.30, "speed": 3.2, "sight": 34, "suppressionResist": 0.70, "weapon": "flamer", "color": [0.45, 0.30, 0.18], "role": "close" },
+  "rocket":         { "name": "Rocket Launcher Specialist", "hp": 100, "armor": 0.20, "speed": 3.3, "sight": 50, "suppressionResist": 0.55, "weapon": "rocket", "color": [0.30, 0.30, 0.30], "role": "heavy" },
+  "medic":          { "name": "Combat Medic",         "hp": 100, "armor": 0.20, "speed": 3.8, "sight": 40, "suppressionResist": 0.50, "weapon": "smg",      "color": [0.82, 0.82, 0.80], "role": "medic", "heal": { "rate": 9, "radius": 7, "kits": 8 } },
+  "engineer":       { "name": "Combat Engineer",      "hp": 110, "armor": 0.25, "speed": 3.5, "sight": 40, "suppressionResist": 0.55, "weapon": "smg",      "color": [0.62, 0.52, 0.22], "role": "engineer", "build": { "speed": 1.0, "clear": 6 } },
+  "special_forces": { "name": "Special Forces",       "hp": 135, "armor": 0.35, "speed": 4.2, "sight": 60, "suppressionResist": 0.85, "weapon": "sf_rifle", "color": [0.15, 0.17, 0.16], "role": "elite" }
+}

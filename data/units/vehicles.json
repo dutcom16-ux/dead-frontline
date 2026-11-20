@@ -1,0 +1,9 @@
+{
+  "_about": "Vehicles. capacity = infantry carried; crush = zombies run over (damage per second of contact). Unlocked through logistics after the FOB is established.",
+  "jeep":      { "name": "Military Jeep",                "hp": 420,  "armor": 0.35, "speed": 9.0, "sight": 55, "capacity": 3, "weapon": "vehicle_mg", "size": [2.0, 4.2, 1.9], "color": [0.32, 0.38, 0.25], "crush": 60 },
+  "apc":       { "name": "Armored Personnel Carrier",    "hp": 1400, "armor": 0.65, "speed": 6.5, "sight": 55, "capacity": 8, "weapon": "vehicle_mg", "size": [2.6, 6.4, 2.5], "color": [0.30, 0.34, 0.24], "crush": 120 },
+  "ifv":       { "name": "Infantry Fighting Vehicle",    "hp": 1700, "armor": 0.70, "speed": 6.0, "sight": 60, "capacity": 6, "weapon": "autocannon", "size": [3.0, 6.6, 2.8], "color": [0.28, 0.32, 0.22], "crush": 140 },
+  "tank":      { "name": "Main Battle Tank",             "hp": 3200, "armor": 0.82, "speed": 5.0, "sight": 65, "capacity": 0, "weapon": "tank_gun",   "size": [3.6, 8.0, 2.6], "color": [0.27, 0.30, 0.21], "crush": 250 },
+  "truck":     { "name": "Military Transport Truck",     "hp": 700,  "armor": 0.30, "speed": 7.5, "sight": 40, "capacity": 12, "weapon": null,         "size": [2.5, 7.5, 3.0], "color": [0.34, 0.37, 0.27], "crush": 80, "cargo": true },
+  "arv":       { "name": "Armored Recovery Vehicle",     "hp": 1800, "armor": 0.70, "speed": 5.0, "sight": 40, "capacity": 0, "weapon": null,         "size": [3.4, 7.6, 2.8], "color": [0.36, 0.34, 0.24], "crush": 150, "repair": 25 }
+}

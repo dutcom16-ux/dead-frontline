@@ -1,0 +1,35 @@
+{
+  "id": "op01",
+  "name": "Mission 01: Operation Reclamation — Retake Toledo City",
+  "briefing": [
+    "Toledo City has fallen. Radio contact with the city government, the port authority and the 3rd Engineer platoon stopped 72 hours ago.",
+    "Your task force is staged on the Naga–Toledo Road east of the city. There is no base yet: you fight with what the squad carries and what logistics can drop.",
+    "Push west along the main road, clear the infected checkpoints, take the key intersections, rescue survivors, secure the hospital, city hall, Toledo Port and the industrial zone, and destroy the main infected concentrations.",
+    "Once Toledo is liberated, establish the task force's permanent Forward Operating Base. There will be only one FOB for the whole campaign: choose its site carefully."
+  ],
+  "intel": [
+    "Walkers in large numbers across Poblacion; runners near the port and markets.",
+    "Brutes and bloaters reported around the plaza and the public market. Screamers call nearby hordes.",
+    "Unconfirmed: a very large infected (designation ABOMINATION) near the city centre.",
+    "The highway is partly blocked by abandoned vehicles; engineers can clear them."
+  ],
+  "squad": [
+    "rifleman",
+    "rifleman",
+    "assault",
+    "machine_gunner",
+    "sniper",
+    "shotgunner",
+    "rocket",
+    "medic",
+    "engineer"
+  ],
+  "supplyLimits": "Air drops only until the FOB exists. Vehicles require the FOB motor pool. Naval transport is not available in this mission.",
+  "victory": "All primary objectives complete (Toledo liberated). Killing every infected is not required.",
+  "defeat": "The whole task force is lost.",
+  "zombies": {
+    "low": 160,
+    "medium": 300,
+    "high": 520
+  }
+}

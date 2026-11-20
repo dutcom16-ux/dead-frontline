@@ -1,0 +1,19 @@
+{
+  "_about": "Military logistics (no resource gathering). stock = available per mission; delivery s; cooldown s; via = air | land | sea; requires = 'fob' | 'comms' | 'motor_pool' | 'campaign:<flag>'.",
+  "ammo_drop":        { "category": "Ammunition",            "name": "Ammunition airdrop",        "stock": 6, "delivery": 25, "cooldown": 60,  "via": "air",  "crate": { "ammo": 4 } },
+  "ammo_convoy":      { "category": "Ammunition",            "name": "Ammunition convoy",         "stock": 3, "delivery": 45, "cooldown": 90,  "via": "land", "requires": "fob", "crate": { "ammo": 10 } },
+  "medical_drop":     { "category": "Medical supplies",      "name": "Medical airdrop",           "stock": 3, "delivery": 25, "cooldown": 75,  "via": "air",  "crate": { "medical": 3, "heal": 60 } },
+  "fireteam":         { "category": "Reinforcements",        "name": "Fireteam (4 infantry)",     "stock": 2, "delivery": 40, "cooldown": 120, "via": "air",  "units": ["rifleman", "rifleman", "assault", "medic"] },
+  "heavy_team":       { "category": "Reinforcements",        "name": "Heavy weapons team",        "stock": 1, "delivery": 60, "cooldown": 180, "via": "land", "requires": "fob", "units": ["machine_gunner", "rocket", "flamethrower"] },
+  "sf_team":          { "category": "Reinforcements",        "name": "Special Forces team",       "stock": 1, "delivery": 50, "cooldown": 240, "via": "air",  "requires": "comms", "units": ["special_forces", "special_forces", "sniper"] },
+  "weapons_cache":    { "category": "Weapons",               "name": "Specialist weapons cache",  "stock": 1, "delivery": 35, "cooldown": 120, "via": "air",  "unlocks": ["flamethrower", "rocket", "shotgunner"], "crate": { "ammo": 2 } },
+  "jeep":             { "category": "Vehicles",              "name": "Military Jeep",             "stock": 2, "delivery": 50, "cooldown": 120, "via": "land", "requires": "motor_pool", "vehicle": "jeep" },
+  "truck":            { "category": "Vehicles",              "name": "Transport Truck",           "stock": 1, "delivery": 55, "cooldown": 150, "via": "land", "requires": "motor_pool", "vehicle": "truck" },
+  "apc":              { "category": "Vehicles",              "name": "Armored Personnel Carrier", "stock": 1, "delivery": 75, "cooldown": 240, "via": "land", "requires": "motor_pool", "vehicle": "apc" },
+  "defense_kit":      { "category": "Defensive equipment",   "name": "Defensive kit",             "stock": 3, "delivery": 30, "cooldown": 60,  "via": "air",  "deploy": { "sandbags": 6, "barbed_wire": 3, "concrete_barrier": 3, "mg_emplacement": 1 } },
+  "fortification_kit":{ "category": "Defensive equipment",   "name": "Fortification kit",         "stock": 2, "delivery": 45, "cooldown": 120, "via": "land", "requires": "fob", "deploy": { "watchtower": 1, "bunker": 1, "reinforced_gate": 1, "lighting": 2 } },
+  "engineering_kit":  { "category": "Engineering equipment", "name": "Engineering kit",           "stock": 2, "delivery": 30, "cooldown": 90,  "via": "air",  "engineering": { "clear": 4, "repair": 3 } },
+  "landing_craft":    { "category": "Naval transportation",  "name": "Landing craft",             "stock": 0, "delivery": 90, "cooldown": 300, "via": "sea",  "requires": "campaign:naval", "note": "Naval operations start in the next campaign phase (Stage 7)." },
+  "artillery":        { "category": "Air support",           "name": "Artillery strike",          "stock": 2, "delivery": 12, "cooldown": 150, "via": "air",  "requires": "comms", "strike": { "radius": 14, "damage": 400, "shells": 6 } },
+  "helicopter_strike":{ "category": "Air support",           "name": "Helicopter gun run",        "stock": 1, "delivery": 18, "cooldown": 240, "via": "air",  "requires": "fob", "strike": { "radius": 9, "damage": 220, "shells": 14, "line": true } }
+}

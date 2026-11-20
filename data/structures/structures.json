@@ -1,0 +1,21 @@
+{
+  "_about": "Structures: size [width, depth] m, height m. model = building archetype used to draw it. fob = permanent FOB facility; deploy = tactical construction by engineers (no resource gathering: stock comes from logistics).",
+  "command_center":   { "name": "Command Center",      "fob": true, "size": [16, 12], "height": 6.5, "model": "government_hall", "roof": "flat",   "color": [0.42, 0.45, 0.36], "enter": true },
+  "barracks":         { "name": "Barracks",            "fob": true, "size": [20, 9],  "height": 4.0, "model": "school_block",    "roof": "gabled", "color": [0.40, 0.44, 0.34], "enter": true, "spawn": true },
+  "field_hospital":   { "name": "Field Hospital",      "fob": true, "size": [14, 10], "height": 4.0, "model": "hospital_block",  "roof": "gabled", "color": [0.85, 0.85, 0.80], "enter": true, "heal": 6 },
+  "supply_depot":     { "name": "Supply Depot",        "fob": true, "size": [18, 12], "height": 6.0, "model": "warehouse",       "roof": "gabled", "color": [0.45, 0.47, 0.38], "resupply": true },
+  "communications":   { "name": "Communications Center", "fob": true, "size": [8, 8], "height": 4.0, "model": "government_hall", "roof": "flat",   "color": [0.48, 0.50, 0.42], "antenna": true },
+  "motor_pool":       { "name": "Motor Pool",          "fob": true, "size": [22, 14], "height": 5.0, "model": "canopy",          "roof": "gabled", "color": [0.42, 0.44, 0.36] },
+  "ammo_storage":     { "name": "Ammunition Storage",  "fob": true, "size": [10, 7],  "height": 3.2, "model": "utility_shed",    "roof": "flat",   "color": [0.38, 0.40, 0.32], "resupply": true },
+  "watchtower":       { "name": "Watchtower",          "fob": true, "deploy": true, "size": [3, 3], "height": 7.0, "model": "utility_shed", "roof": "pyramidal", "color": [0.45, 0.40, 0.32], "vision": 1.6, "build": 25 },
+  "bunker":           { "name": "Defensive Bunker",    "fob": true, "deploy": true, "size": [6, 4], "height": 2.2, "model": "concrete_house_1f", "roof": "flat", "color": [0.55, 0.55, 0.52], "enter": true, "build": 35 },
+  "perimeter":        { "name": "Defensive Perimeter", "fob": true, "wall": true, "height": 2.4, "color": [0.52, 0.50, 0.46] },
+  "repair_facility":  { "name": "Vehicle Repair Facility", "fob": true, "size": [16, 12], "height": 6.0, "model": "industrial_plant", "roof": "gabled", "color": [0.40, 0.42, 0.36], "repair": 30 },
+  "sandbags":         { "name": "Sandbags",            "deploy": true, "size": [4.0, 0.9], "height": 1.1, "model": "ruin", "roof": "flat", "color": [0.62, 0.55, 0.40], "build": 6, "cover": true },
+  "barbed_wire":      { "name": "Barbed wire",         "deploy": true, "size": [5.0, 1.2], "slow": 0.3, "dps": 3, "build": 5 },
+  "concrete_barrier": { "name": "Concrete barrier",    "deploy": true, "size": [3.2, 0.7], "height": 1.0, "model": "ruin", "roof": "flat", "color": [0.72, 0.72, 0.70], "build": 8, "cover": true },
+  "barricade":        { "name": "Portable barricade",  "deploy": true, "size": [2.6, 0.5], "height": 1.7, "model": "ruin", "roof": "flat", "color": [0.48, 0.40, 0.30], "build": 4 },
+  "mg_emplacement":   { "name": "Machine gun emplacement", "deploy": true, "size": [3.2, 3.2], "height": 1.0, "model": "ruin", "roof": "flat", "color": [0.62, 0.55, 0.40], "turret": "lmg", "build": 15 },
+  "reinforced_gate":  { "name": "Reinforced gate",     "deploy": true, "size": [5.0, 0.6], "height": 2.6, "model": "ruin", "roof": "flat", "color": [0.40, 0.42, 0.40], "gate": true, "build": 12 },
+  "lighting":         { "name": "Portable lighting",   "deploy": true, "size": [1.0, 1.0], "light": 30, "build": 3 }
+}

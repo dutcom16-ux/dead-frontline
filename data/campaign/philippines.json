@@ -1,0 +1,29 @@
+{
+  "_about": "Operation Reclamation. Positions are approximate city/area centres (lat, lon) for the strategic map markers.",
+  "phases": [
+    { "id": "cebu", "name": "Phase 1 — Cebu", "operations": [
+      { "id": "op01", "name": "Retake Toledo City", "pos": [10.377, 123.638], "status": "available", "mission": "op01" },
+      { "id": "op02", "name": "Secure Toledo–Balamban corridor", "pos": [10.50, 123.72], "status": "locked", "requires": "op01" },
+      { "id": "op03", "name": "Secure coastal facilities", "pos": [10.30, 123.63], "status": "locked", "requires": "op01" },
+      { "id": "op04", "name": "Rescue civilians in surrounding municipalities", "pos": [10.25, 123.70], "status": "locked", "requires": "op02" },
+      { "id": "op05", "name": "Retake Cebu City", "pos": [10.31, 123.89], "status": "locked", "requires": "op04" },
+      { "id": "op06", "name": "Secure northern Cebu", "pos": [11.0, 124.0], "status": "locked", "requires": "op05" },
+      { "id": "op07", "name": "Clear remaining Cebu zones", "pos": [10.6, 123.95], "status": "locked", "requires": "op06" } ] },
+    { "id": "visayas", "name": "Phase 2 — Visayas", "operations": [
+      { "id": "negros", "name": "Negros", "pos": [10.68, 122.95], "status": "locked", "requires": "op07" },
+      { "id": "bohol", "name": "Bohol", "pos": [9.65, 123.85], "status": "locked", "requires": "op07" },
+      { "id": "leyte", "name": "Leyte", "pos": [11.24, 125.0], "status": "locked", "requires": "op07" },
+      { "id": "samar", "name": "Samar", "pos": [11.78, 124.88], "status": "locked", "requires": "leyte" },
+      { "id": "panay", "name": "Panay", "pos": [10.72, 122.56], "status": "locked", "requires": "negros" } ] },
+    { "id": "luzon", "name": "Phase 3 — Luzon", "operations": [
+      { "id": "south_luzon", "name": "Southern Luzon", "pos": [13.94, 121.62], "status": "locked", "requires": "samar" },
+      { "id": "manila", "name": "Metro Manila", "pos": [14.6, 120.98], "status": "locked", "requires": "south_luzon" },
+      { "id": "central_luzon", "name": "Central Luzon", "pos": [15.03, 120.69], "status": "locked", "requires": "manila" },
+      { "id": "north_luzon", "name": "Northern Luzon", "pos": [18.2, 120.6], "status": "locked", "requires": "central_luzon" } ] },
+    { "id": "mindanao", "name": "Phase 4 — Mindanao", "operations": [
+      { "id": "cdo", "name": "Cagayan de Oro", "pos": [8.48, 124.65], "status": "locked", "requires": "bohol" },
+      { "id": "davao", "name": "Davao", "pos": [7.07, 125.61], "status": "locked", "requires": "cdo" },
+      { "id": "gensan", "name": "General Santos", "pos": [6.11, 125.17], "status": "locked", "requires": "davao" },
+      { "id": "zamboanga", "name": "Zamboanga", "pos": [6.91, 122.08], "status": "locked", "requires": "cdo" } ] }
+  ]
+}
