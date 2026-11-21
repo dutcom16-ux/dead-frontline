@@ -31,9 +31,9 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
   * Each crop keeps only its own figure (no piece of a neighbour's rifle) and drops the faint
     background alpha and the ground shadow under the boots.
 * **Corrections:**
-  * The SE groups are drawn facing east (backpack to the viewer, rifle level to the right). A
-    south-east soldier would look as if walking away, so **`*_SE` is the SW art mirrored** (front
-    three-quarter view, rifle down-right). The sheet's SE frames are cut but not used.
+  * The SE groups are drawn facing east (backpack to the viewer, rifle tilted slightly down to the
+    right): there is no south-east art. They are used as drawn, as a fallback for the missing view.
+    Mirroring the SW groups instead would put the rifle in the left hand in that one view.
   * The dying section is drawn about 11–20 % smaller than the walking one. Each direction's dying
     frames are scaled so the standing ones match that direction's walking height.
   * Frame-to-frame size noise within a clip is evened out (at most ±6 %).
@@ -55,7 +55,10 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
 * **In the game** (`src/game/rendering/Sprites.ts`, `soldierPose` and `dyingPose`):
   * State by priority: dying (from the soldier's corpse) > firing > walking > idle.
   * Firing faces the target. Each real shot (`Unit.shotN`, counted in `Combat.fire`) shows the shot
-    frame for 0.06 s with the muzzle flash, then the recoil frame for 0.08 s, then aim. Soldiers whose
+    frame for 0.06 s with the muzzle flash, then the recoil frame for 0.08 s, then aim. Automatic
+    weapons (under 0.25 s between rounds: carbine, SMG, special-forces rifle, machine gun,
+    flamethrower) hold the shot frame through a burst, with the flash on every round, and recoil once
+    when the burst ends. Soldiers whose
     weapon fires on the move keep the firing stance while moving; machine gunners, snipers and
     rocket troops walk and fire only when stopped.
   * A walk starts on its first stride frame (a step), never mid-cycle; stopping shows the standing
@@ -63,7 +66,7 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
   * Walking faces the way the soldier really goes. The cycle (two steps) advances with the distance
     covered: 1.4 m plus 0.25 m per m/s of speed, about 2.3 m at a rifleman's 3.6 m/s and shorter at a
     slow formation pace. The feet don't slide.
-  * Idle stands with a slight breathing movement; in a halted line, box, circle or defensive formation
+  * Idle stands breathing (the figure stretches 0.6 % from the feet, which stay put); in a halted line, box, circle or defensive formation
     or on hold/defend orders, the soldier stands at the ready (aim frame).
   * Turning: one view at a time through the views in between; a view is kept until the heading is
     clearly past it; a turn is never undone within 0.3 s; aim is held for 0.8 s after a target drops.
@@ -129,11 +132,13 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
   * Eight screen views, steadied as for soldiers, facing the way the infected really moves (or its
     victim). Drawn with the nearest view: S and SW the three-quarter clip, SE that clip mirrored, E
     and NE the side clip, W and NW mirrored, N from behind (mirrored on alternate steps, which swaps
-    the legs).
-  * Walk, run and crawl loops advance with the distance covered (`LOOP_M` in Sprites.ts); runners
-    switch to a run clip above 2.4 m/s; mutants charge.
-  * Standing: one fixed frame per infected (front, side or back by its view) with slow breathing, no
-    cycling through the row's different faces.
+    the legs). The infected carry nothing, so mirroring them puts nothing in the wrong hand.
+  * Walk, run and crawl loops advance with the distance covered (`LOOP_M` in Sprites.ts). Walking
+    clips used faster than a walking pace (1.7 m/s) take longer strides rather than playing faster.
+    Runners switch to a run clip above 2.6 m/s and back below 2.2; mutants charge, and hold their leg
+    pose during a leap.
+  * Standing: one fixed frame per infected (front, back, or side-on with its feet together:
+    `stand_E`, `stand_E2`) with slow breathing, no cycling through the row's different faces.
   * Attacking: the full-reach frame on each real hit (the attack timer restarting), back to ready
     over 0.3 s, wind-up over the last 0.35 s before the next hit. Crawlers use their most
     outstretched crawl frame.
@@ -148,7 +153,9 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
 * Military survivors are drawn from the military sheet: walk cycle while moving, standing otherwise.
 * Other survivors are 3D figures: three poses (feet together, left foot forward, right foot forward)
   alternate with the distance walked, and arms swing against the legs.
-* The abomination (and any infected drawn in 3D) bobs with each step it takes, not with the clock.
+* The abomination steps: three 3D poses (feet together, left foot forward, right foot forward, arms
+  swinging against the legs) alternate with the distance walked, its feet on the ground. (Infected
+  drawn in 3D only because their sheet failed to load bob with each step instead.)
 * Vehicles, helicopters and boats are rigid 3D models: no wheel, track or rotor animation.
 
 ## Drawing and fallback

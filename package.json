@@ -14,7 +14,8 @@
     "test:mobile": "node test/mobile.mjs",
     "test:formations": "node test/formations.mjs dist",
     "test:anim": "node test/anim.mjs dist",
-    "test:units": "node test/units.mjs dist"
+    "test:units": "node test/units.mjs dist",
+    "test:battle": "node test/battle.mjs dist"
   },
   "devDependencies": {
     "esbuild": "^0.25.0",

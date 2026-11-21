@@ -83,7 +83,7 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
 | Test | Result |
 |---|---|
 | `test/anim.mjs` (soldiers) | 18/18 (35 checks after the per-class tests were added) |
-| `test/units.mjs` (other units) | 65/65; crowd of 200 infected: 1.5 ms per drawn frame |
+| `test/units.mjs` (other units) | 65/65; crowd of 200 infected: 1.5 ms per drawn frame (82 checks after the repair) |
 | `test/formations.mjs` | 20/20 |
 | Playthrough low | 16/16; liberated at 61 min, 255 killed, 1 loss |
 | Playthrough medium | 16/16; liberated at 67 min, 389 killed, 16 losses |
@@ -132,5 +132,14 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
     while walking, feet together when standing.
 - [x] Vehicles and transports: confirmed unchanged (rigid models; no feet, so no sliding; no
   separate wheels, tracks or rotors to animate without new models)
-- [ ] Game-wide QA: mixed battle, rapid commands, selection, stops and turns, deaths in combat, performance
-- [ ] Regression: formations, playthroughs, systems, mobile
+- [x] Game-wide QA: mixed battle, rapid commands, selection, stops and turns, deaths in combat, performance
+  * `test/battle.mjs` 10/10: 20 move orders in 8 s then a halt (no skipped views, no flicker, nobody
+    left walking); selection and deselection while moving (rings follow); 22 units with a jeep and a
+    tank against 132 infected of every type, the squad advancing mid-fight (151 figures animated,
+    70,502 figure-frames: no skipped views, no flicker, nobody walking on the spot, no pose for the
+    dead, no missing frames); a soldier and 132 infected dying in combat (once, then still).
+  * Performance: sprite drawing 0.5 ms a frame on average (13 ms at most, the first frame); the CPU
+    builds a full 3D + overlay frame in 1.4 ms. Crowd of 200 infected: 1.3 ms.
+- [x] Regression: formations, playthroughs, systems, mobile
+  * Formations 20/20; playthrough low 16/16 (61 min, 255 killed, 1 loss) and medium 16/16 (67 min,
+    389 killed, 16 losses), the same as before the repair; systems and mobile pass.
