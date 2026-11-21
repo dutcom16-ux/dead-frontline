@@ -104,7 +104,18 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
   * Tested (`test/anim.mjs` 35/35): all 10 classes fire at a target (flash rules, steadiness) and move
     past it (firing stance for classes that fire on the move, walk for machine gun, sniper and rocket);
     8-direction firing and walking; dying in 8 views; march and fight.
-- [ ] Infected: Z1 standing frame, Z2 speed of loops; test every type
+- [x] Infected: Z1 standing frame, Z2 speed of loops; test every type
+  * Z1: standing side-on uses the narrowest-stance frame of that infected's walk (`stand_E`,
+    `stand_E2`) instead of a mid-stride one. The hunched walker has no frame with its feet together
+    (art): its narrowest is used.
+  * Z2: walking clips used at running speed lengthen the stride with speed instead of playing
+    faster: at most 12.4 frame changes a second at 4.6 m/s (were 23–26). The back view's steps
+    lengthen the same way.
+  * Also found and fixed while testing: a runner near 2.4 m/s flipped between its run and walk clips
+    every few frames (now a 2.2–2.6 m/s margin), and a mutant's leap (3.2× speed) spun its legs at
+    16 frames a second (now the legs hold their pose during the leap).
+  * Tested (`test/units.mjs` 80/80): all seven types walk out in 8 directions, stand, sprint in from
+    30 m, attack, and die; cadence, standing stance, views, clips, hits and deaths per type.
 - [ ] Abomination: A1 walking legs; test
 - [ ] Turned soldier: retest
 - [ ] Survivors: retest

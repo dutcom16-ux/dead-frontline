@@ -203,6 +203,14 @@ def by_reach(items):
         return xs[up].max() - it[1][0]
     return sorted(items, key=reach)
 
+def narrowest(items):
+    """the frame with the feet closest together: the standing pose of a walk"""
+    def spread(it):
+        a = np.asarray(it[0])[..., 3] > 100; ys = np.nonzero(a.any(axis=1))[0]
+        foot = a[ys.max() - max(3, (ys.max() - ys.min()) // 8):]
+        xs = np.nonzero(foot.any(axis=0))[0]; return xs.max() - xs.min()
+    return [min(items, key=spread)]
+
 Z = Atlas()
 Z.add("idle_S", zframes([("L", 0, range(6))]))                 # facing the viewer; six different faces
 Z.add("idle_S2", zframes([("L", 4, range(6))]))
@@ -211,6 +219,8 @@ Z.add("walk_SW", smooth_loop(zframes([("M", 0, range(9))])))   # three-quarter f
 Z.add("walk_SW2", smooth_loop(zframes([("M", 1, [3, 5, 6, 8]), ("M", 2, [3, 6, 7])])))
 Z.add("walk_E", smooth_loop(zframes([("M", 3, range(5))])))    # side on, facing right
 Z.add("hunch_E", smooth_loop(zframes([("M", 4, range(5))])))
+Z.add("stand_E", narrowest(zframes([("M", 3, range(5))])))     # standing side on: feet together
+Z.add("stand_E2", narrowest(zframes([("M", 4, range(5))])))
 Z.add("lunge_E", by_reach(zframes([("M", 3, [5, 6, 7, 8])])))  # walk_E's man attacking
 Z.add("claw_E", by_reach(zframes([("M", 4, [2, 5, 6])])))      # hunch_E's man attacking
 Z.add("attack_E", by_reach(zframes([("L", 3, range(6))])))

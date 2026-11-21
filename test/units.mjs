@@ -109,13 +109,14 @@ const r = await page.evaluate(() => {
   A.__issue(g, [T0], { kind: "hold" }, {});
   pins.push([T0, C[0], C[1]]);
   const attackers = [];
-  for (const [k, type] of TYPES.entries()) {
-    const [vx, vy] = mapDir(k * 51);
-    const z = g.addZombie(type, C[0] + vx * 4, C[1] + vy * 4); if (!z) continue;
+  for (const [k, type] of [...TYPES.entries(), ...TYPES.entries()]) {
+    // half start close, half sprint in from 30 m (full chase speed: 4.6 m/s for runners)
+    const far = attackers.length >= TYPES.length, [vx, vy] = mapDir(k * 51 + (far ? 25 : 0));
+    const z = g.addZombie(type, C[0] + vx * (far ? 30 : 4), C[1] + vy * (far ? 30 : 4)); if (!z) continue;
     z.awake = true; z.state = "chase"; z.target = T0.id; z.lastSeenX = C[0]; z.lastSeenY = C[1]; z.lastSeenT = g.time; attackers.push(z);
   }
   const atkFrom = g.time;
-  step(8, () => { for (const z of attackers) { z.target = T0.id; if (z.state !== "attack") z.state = "chase"; } });
+  step(12, () => { for (const z of attackers) { z.target = T0.id; if (z.state !== "attack") z.state = "chase"; } });
   const atkTo = g.time;
   // ---- 3. turned soldiers: walk out in 8 directions, then attack
   for (const z of attackers) z.dead = true; g.compact();
@@ -199,7 +200,7 @@ const r = await page.evaluate(() => {
 
   // ---------------- metrics
   const per = {};
-  const bucket = (id) => { const m = meta.get(id); const key = m.kind === "infected" ? m.type : m.kind === "turned" ? "turned" : m.type === "military" ? "survivor (soldier sprite)" : "survivor"; return (per[key] ||= { n: 0, frames: 0, jumps: 0, flicker: 0, walkFrames: 0, offView: 0, wrongClip: 0, framesStill: 0, frameChangesStill: 0, idleFaces: 0, metres: 0, cycleSteps: 0, hits: 0, hitsShown: 0, missed: [] }); };
+  const bucket = (id) => { const m = meta.get(id); const key = m.kind === "infected" ? m.type : m.kind === "turned" ? "turned" : m.type === "military" ? "survivor (soldier sprite)" : "survivor"; return (per[key] ||= { n: 0, frames: 0, jumps: 0, flicker: 0, walkFrames: 0, offView: 0, wrongClip: 0, framesStill: 0, frameChangesStill: 0, idleFaces: 0, metres: 0, cycleSteps: 0, hits: 0, hitsShown: 0, missed: [], walkT: 0, standSide: 0, standSideWide: 0 }); };
   const viewClip = (anim, flip, v) => {
     const d = COMPASS[v];
     if (/^(attack|lunge|claw|crawl_attack)_E$/.test(anim)) return true;                       // attack: side view toward the victim
@@ -214,6 +215,14 @@ const r = await page.evaluate(() => {
   };
   for (const [id, seq] of log) {
     const b = bucket(id); b.n++;
+    // fastest cadence over any second of continuous movement (sprints included)
+    for (let k = 30; k < seq.length; k += 5) {
+      const w = seq.slice(k - 30, k);
+      if (!w.every((q, j) => j === 0 || Math.hypot(q.x - w[j - 1].x, q.y - w[j - 1].y) / Math.max(1e-6, q.t - w[j - 1].t) > 0.6)) continue;
+      let ch = 0; for (let j = 1; j < w.length; j++) if (w[j].view === w[j - 1].view && (w[j].i !== w[j - 1].i || w[j].flip !== w[j - 1].flip)) ch++;   // (turning changes the view: not cadence)
+      const sp = Math.hypot(w[29].x - w[0].x, w[29].y - w[0].y) / (w[29].t - w[0].t);
+      if (ch / (w[29].t - w[0].t) > (b.peak || 0)) { b.peak = ch / (w[29].t - w[0].t); b.peakSpd = sp; b.peakInfo = w.map((q) => `${q.anim.replace(/_/g, '')}${q.i}${q.flip ? 'f' : ''}v${q.view}`).join(' '); }
+    }
     let lastChange = null, still = 0;
     for (let k = 1; k < seq.length; k++) {
       const a = seq[k - 1], q = seq[k]; b.frames++;
@@ -231,12 +240,14 @@ const r = await page.evaluate(() => {
         const p = seq[Math.max(0, k - 15)];
         const dd = Math.hypot(q.x - p.x, q.y - p.y);
         if (dd > 0.6) { const c = compassOf(q.x - p.x, q.y - p.y); const off = Math.abs(((c - q.view * 45 + 540) % 360) - 180); if (off > 67.5) b.offView++; }
-        b.metres += d; if (q.i !== a.i) b.cycleSteps++;
+        b.metres += d; b.walkT += dt; if (q.i !== a.i) b.cycleSteps++;
       }
       // standing still (not attacking): the frame must not change (no walking on the spot, no face swaps)
       if (d < 1e-4 && a.anim === q.anim && !/attack|lunge|claw/.test(q.anim) && q.t - (seq[k - 2]?.t ?? 0) > 0) {
         still++;
         // (after the 0.5 s it takes to come to a stop; turning on the spot changes the view: allowed)
+        // standing side-on: the narrowest-stance frame (feet together), not a mid-stride one
+        if (still > 15 && meta.get(id).kind === "infected" && /^(walk_E|hunch_E|stand_E2?)$/.test(q.anim)) { b.standSide++; if (!/^stand_E/.test(q.anim)) b.standSideWide++; }
         if (still > 15 && q.view === a.view) { b.framesStill++; if (q.i !== a.i || q.flip !== a.flip) { b.frameChangesStill++; if (b.missed.length < 6) b.missed.push(`still ${a.anim}:${a.i}${a.flip ? 'f' : ''}>${q.anim}:${q.i}${q.flip ? 'f' : ''} ${q.state}`); } }
       } else still = 0;
       if (/^idle_S/.test(q.anim) && /^idle_S/.test(a.anim) && q.i !== a.i && d < 1e-4) b.idleFaces++;
@@ -290,6 +301,8 @@ for (const [type, b] of Object.entries(r.per)) {
   checks.push([b.wrongClip === 0, `${type}: every view uses its own drawn clip: ${b.wrongClip} wrong`]);
   if (b.walkFrames > 30) checks.push([b.offView <= b.walkFrames * 0.03, `${type}: walking faces the way it goes: ${b.offView}/${b.walkFrames} frames more than a view off`]);
   if (b.walkFrames > 30) checks.push([cyc > 0.5 && cyc < 12, `${type}: cycle follows distance: ${cyc.toFixed(2)} frame changes per metre`]);
+  if (b.walkFrames > 30) checks.push([b.cycleSteps / b.walkT <= 14 && (b.peak || 0) <= 15, `${type}: cycle speed suits the pace: ${(b.cycleSteps / b.walkT).toFixed(1)} frame changes per second on average, at most ${(b.peak || 0).toFixed(1)} (at ${(b.peakSpd || 0).toFixed(1)} m/s)${(b.peak || 0) > 15 ? ' ' + b.peakInfo : ''}`]);
+  if (b.standSide > 0) checks.push([b.standSideWide === 0, `${type}: standing side-on with feet together: ${b.standSideWide}/${b.standSide} frames mid-stride`]);
   if (b.framesStill > 10) checks.push([b.frameChangesStill === 0 && b.idleFaces === 0, `${type}: standing still keeps one frame (no stepping on the spot, no face swaps): ${b.frameChangesStill} changes in ${b.framesStill} frames ${b.frameChangesStill ? b.missed.join(' ') : ''}`]);
   if (b.hits > 0) checks.push([b.hitsShown === b.hits, `${type}: every hit shows the full reach: ${b.hitsShown}/${b.hits} ${b.missed.join(" ")}`]);
 }

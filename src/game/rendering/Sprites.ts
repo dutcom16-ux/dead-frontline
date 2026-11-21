@@ -45,11 +45,15 @@ const DIE_FPS = 10, SHOT_S = 0.06, RECOIL_S = 0.08, AIM_HOLD_S = 0.8;
 const AUTO_S = 0.25;
 export type SoldierState = "idle" | "walk" | "fire";
 /** animation state of one figure: displayed view, cycle phase, measured movement, last shot / hit */
-interface Anim { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number }
+interface Anim { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number; run: boolean; inst: number }
 /** the last pose an infected was drawn in (its fall starts from it) */
 interface LastPose { anim: string; i: number; flip: boolean; size: number; wide: number; tint: string; sheet: "Z" | "ZS"; view: Dir8 }
 /** metres covered by one loop of each infected clip (the loop advances with distance: no sliding) */
 const LOOP_M: Record<string, number> = { walk_SW: 1.6, walk_SW2: 1.3, walk_E: 1.0, hunch_E: 1.0, run_E: 2.6, run_E2: 2.0, run_E3: 1.6, charge_E: 2.8, crawl_E: 0.7 };
+/** walking clips are set for a walking pace (m/s); faster, the stride lengthens (a runner using a walk
+ * clip in a view that has no run art takes longer steps, not a frantic shuffle) */
+const WALK_PACE = 1.7;
+const strideK = (spd: number) => (spd > WALK_PACE ? Math.pow(spd / WALK_PACE, 0.85) : 1);
 /** turned soldier: the walk clip ramps from standing to a long stride; slow and fast step cycles */
 const ZS_SLOW = [0, 1, 2, 3, 2, 1], ZS_FAST = [1, 2, 3, 4, 3, 2], ZS_LOOP_M = 1.4;
 const FALL_S = 0.45;   // infected fall: standing pose tips over and gives way to the lying frame
@@ -116,7 +120,7 @@ export class Sprites {
   private stateOf(u: { id: number; x: number; y: number }, cam: IsoCamera, heading: number, now: number): Anim {
     let st = this.anim.get(u.id);
     if (!st) {
-      st = { dir: Math.round(this.compassDeg(cam, heading) / 45) % 8, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9 };
+      st = { dir: Math.round(this.compassDeg(cam, heading) / 45) % 8, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9, run: false, inst: 0 };
       this.anim.set(u.id, st);
     }
     return st;
@@ -131,6 +135,7 @@ export class Sprites {
       st.spd = st.spd * (1 - k) + (speed ?? moved / dt) * k;
       st.vx = st.vx * (1 - k) + ((x - st.lx) / dt) * k; st.vy = st.vy * (1 - k) + ((y - st.ly) / dt) * k;
       if (moved / dt > 0.3) st.mt = now;
+      st.inst = moved / dt;
     }
     st.lx = x; st.ly = y; st.lt = now;
     return moved;
@@ -322,7 +327,13 @@ export class Sprites {
     const left = d === "W" || d === "NW" || d === "SE";   // drawn mirrored
     const rig = z.id % 2;
     const out = (anim: string, i: number, flip = left, sy = 1) => ({ anim, i, flip, bob: 0, sy, view: d });
-    const advance = (anim: string) => { st.phase += moved / (LOOP_M[anim] || 1.2); return Math.floor(st.phase * this.zombies!.atlas.anims[anim].length); };
+    // a mutant's leap: the body flies, the legs hold their pose (no leg flurry at 3x speed)
+    const leaping = !!z.def.leap && z.leapT > 3.6;
+    const advance = (anim: string) => {
+      const run = /^(run|charge)/.test(anim);   // run clips are drawn for running speed already
+      if (!leaping) st.phase += moved / ((LOOP_M[anim] || 1.2) * (run ? 1 : strideK(st.inst)));
+      return Math.floor(st.phase * this.zombies!.atlas.anims[anim].length);
+    };
     if (z.type === "crawler") {
       if (attacking) {          // no attack frames: the crawl frames from the least to the most outstretched arm
         const [sx] = t ? this.facing(cam, Math.atan2(t.y - z.y, t.x - z.x)) : [left ? -1 : 1];
@@ -343,14 +354,16 @@ export class Sprites {
     if (!moving) {
       const sy = 1 + Math.sin(now * 1.6 + z.id * 1.7) * 0.012;      // breathing (scaled from the feet: they stay put)
       if (d === "N" || d === "NE" || d === "NW") return out("back_N", z.id % 2, z.id % 3 === 0, sy);
-      if (side) return out(rig ? "hunch_E" : "walk_E", 0, left, sy);
+      if (side) return out(rig ? "stand_E2" : "stand_E", 0, left, sy);   // the narrowest stance of that walk
       return out(z.id % 3 ? "idle_S" : "idle_S2", z.id % 6, false, sy);
     }
     if (d === "N") {
-      st.phase += moved / 0.55;                                       // one step every 0.55 m
+      if (!leaping) st.phase += moved / (0.55 * strideK(st.inst));    // one step every 0.55 m (longer when running)
       return out("back_N", z.id % 2, Math.floor(st.phase) % 2 === 1);
     }
-    const run = st.spd > 2.4;
+    // run clips above 2.6 m/s, walk clips below 2.2: a margin so a pace near the switch doesn't flip clips
+    if (st.spd > 2.6) st.run = true; else if (st.spd < 2.2) st.run = false;
+    const run = st.run;
     if (side) {
       const anim = z.type === "mutant" && run ? "charge_E" : run ? ["run_E", "run_E2", "run_E3"][z.id % 3] : rig ? "hunch_E" : "walk_E";
       return out(anim, advance(anim));
