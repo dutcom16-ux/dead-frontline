@@ -22,9 +22,18 @@ previous soldier sheet. It is no longer used and nothing cuts it.
 
 ## Infantry soldier (`public/sprites/soldier16.*`)
 
-* **Source:** a desert-camo rifleman built from 3D shapes and rendered from a 3/4 camera
-  (`tools/soldier3d/soldier3d.py` for the rig, `anims.py` for the poses). Every frame comes from the
+* **Source:** a rifleman built from 3D shapes and rendered from a 3/4 camera
+  (`tools/soldier3d/soldier3d.py` for the rig and kit, `anims.py` for the poses). Every frame comes from the
   same rig at the same scale, so the figure doesn't change between frames, clips or views.
+* **Kit** (current US Army issue, simplified so it reads at about 90 px tall):
+  * uniform in an OCP / MultiCam-style pattern (tan, khaki, olive, brown, dark-brown branches);
+  * coyote plate carrier with a cummerbund, three ranger-green magazine pouches, an admin pouch and
+    a tourniquet; a battle belt with a first-aid pouch and a dump pouch; knee pads;
+  * high-cut helmet in OCP with side rails, a night-vision mount and binocular night-vision goggles
+    flipped up, a battery pack at the back, and a comms headset under it; ballistic glasses;
+  * assault pack with a radio and whip antenna;
+  * M7-style rifle in flat dark earth with a suppressor, a fire-control optic and a laser module.
+  The palette and every item are in `build()` in `tools/soldier3d/soldier3d.py`.
 * **Views:** 16, every 22.5°: N, NNE, NE, ENE, E, ESE, SE, SSE, S, SSW, SW, WSW, W, WNW, NW, NNW
   (N = back to the viewer, S = facing the viewer, clockwise). They are listed in the JSON's `views`.
 * **Building it:** `cd tools/soldier3d && python3 game_atlas.py` (about 5 minutes on 2 cores, needs
@@ -82,9 +91,9 @@ previous soldier sheet. It is no longer used and nothing cuts it.
 * **Slicing:** by grid cell (some frames touch). Each row is scaled so the standing figure is 100 px
   tall, because the sheet's rows are not drawn at one size. Standing frames are anchored at the hips
   (the stride doesn't shift the body); kneeling and lying ones at the body's middle. Reach frames are
-  ordered by how far the arm reaches along the view (ready, grab). The sheet's desert camouflage is
-  kept as drawn, so a soldier who turns still wears the desert soldier's uniform. (It used to be
-  re-dyed olive to match the previous soldier sheet.)
+  ordered by how far the arm reaches along the view (ready, grab). The sheet's tan desert
+  camouflage is kept as drawn, which is close to the soldier's OCP pattern. (It used to be re-dyed
+  olive to match the previous soldier sheet.)
 * **Clips:** `z_walk_<D>`, `z_attack_<D>`, `z_die_<D>`.
 * **In the game** (`zpose8`): steadied 8-direction views as for soldiers, facing the way he really
   moves or his victim. The step cycle (stride frames 1-2-3-4-3-2 when hurrying, 0-1-2-3-2-1 slower)

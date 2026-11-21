@@ -1,7 +1,12 @@
-# Desert soldier sheets (16 directions)
+# Soldier sheets (16 directions)
 
 Rendered in code from one 3D soldier rig (`tools/soldier3d/`), so the figure, gear and camo are the
 same in every frame and every direction. Made for this project; free to redistribute with it.
+
+The kit follows current US Army issue: an OCP-pattern uniform; a plate carrier with magazine pouches;
+a high-cut helmet with night-vision goggles flipped up and a comms headset; an assault pack with a
+radio antenna; and an M7-style suppressed rifle with a fire-control optic (see `docs/ASSETS.md`).
+The folder keeps its old name.
 
 `soldier_preview.gif` shows 8 of the 16 directions playing every clip.
 

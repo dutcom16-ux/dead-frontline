@@ -86,37 +86,51 @@ MAT = {
     "olive2": dict(col=(0.33, 0.31, 0.20), spec=0.05),
     "coyote": dict(col=(0.56, 0.47, 0.33), spec=0.05),
     "skin":   dict(col=(0.80, 0.58, 0.44), spec=0.10),
-    "glove":  dict(col=(0.30, 0.27, 0.22), spec=0.06),
+    "glove":  dict(col=(0.36, 0.30, 0.22), spec=0.06),
     "boot":   dict(col=(0.52, 0.42, 0.30), spec=0.06),
     "sole":   dict(col=(0.20, 0.18, 0.16), spec=0.05),
     "gun":    dict(col=(0.15, 0.15, 0.16), spec=0.45),
     "gunlt":  dict(col=(0.30, 0.28, 0.24), spec=0.25),
     "lens":   dict(col=(0.05, 0.06, 0.08), spec=0.9),
     "brass":  dict(col=(0.90, 0.68, 0.26), spec=0.8),
+    # modern kit: coyote brown carrier, ranger green pouches, black electronics, FDE rifle
+    "cb":     dict(col=(0.50, 0.41, 0.29), spec=0.05),
+    "cb2":    dict(col=(0.40, 0.33, 0.23), spec=0.05),
+    "rg":     dict(col=(0.29, 0.30, 0.22), spec=0.05),
+    "black":  dict(col=(0.08, 0.08, 0.09), spec=0.30),
+    "nvg":    dict(col=(0.11, 0.11, 0.12), spec=0.45),
+    "fde":    dict(col=(0.62, 0.53, 0.38), spec=0.18),
+    "can":    dict(col=(0.17, 0.17, 0.18), spec=0.40),
 }
 MAT_IDS = {k: i for i, k in enumerate(MAT)}
-CAMO_COLS = np.array([
-    (0.74, 0.64, 0.47),   # base sand
-    (0.87, 0.80, 0.64),   # light
-    (0.55, 0.44, 0.30),   # brown
-    (0.38, 0.30, 0.21),   # dark
+CAMO_COLS = np.array([   # OCP / MultiCam-style
+    (0.66, 0.60, 0.45),   # base tan
+    (0.79, 0.74, 0.58),   # light khaki
+    (0.45, 0.46, 0.30),   # olive green
+    (0.53, 0.41, 0.27),   # brown
+    (0.29, 0.22, 0.15),   # dark brown branches
 ])
 _rng = np.random.default_rng(7)
 _K1 = _rng.normal(size=(4, 3))
-_K1 = _K1 / np.linalg.norm(_K1, axis=1, keepdims=True) * 13.0
+_K1 = _K1 / np.linalg.norm(_K1, axis=1, keepdims=True) * 19.0
 _K2 = _rng.normal(size=(4, 3))
-_K2 = _K2 / np.linalg.norm(_K2, axis=1, keepdims=True) * 21.0
+_K2 = _K2 / np.linalg.norm(_K2, axis=1, keepdims=True) * 30.0
 _P1 = _rng.uniform(0, 6.28, 4)
 _P2 = _rng.uniform(0, 6.28, 4)
+_K3 = _rng.normal(size=(4, 3))
+_K3 = _K3 / np.linalg.norm(_K3, axis=1, keepdims=True) * 46.0
+_P3 = _rng.uniform(0, 6.28, 4)
 
 
 def camo_color(q):
     n1 = np.sin(q @ _K1.T + _P1).sum(1) + 0.5 * np.sin(q @ (_K1.T * 2.1) + _P2).sum(1)
     n2 = np.sin(q @ _K2.T + _P2).sum(1) + 0.5 * np.sin(q @ (_K2.T * 1.7) + _P1).sum(1)
+    n3 = np.sin(q @ _K3.T + _P3).sum(1)
     idx = np.zeros(len(q), int)
-    idx[n2 > 1.3] = 1
-    idx[n1 > 1.2] = 2
-    idx[n1 > 2.4] = 3
+    idx[n1 > 0.9] = 1                       # soft khaki fields
+    idx[n2 > 1.25] = 2                      # green blobs
+    idx[n2 < -1.7] = 3                      # brown blobs
+    idx[(n3 > 2.25) & (n1 < 1.8)] = 4       # small dark-brown branches
     return CAMO_COLS[idx]
 
 
@@ -309,7 +323,7 @@ def build(J, fx=None):
         kdir = nrm(np.cross(nrm(an - kn), Rp[:, 0] * sx)) * sx
         fwd = Rp[:, 2]
         kd = nrm(fwd - nrm(kn - hip) * np.dot(fwd, nrm(kn - hip)))
-        pr.append(Prim("ell", "olive", 0.0, c=kn + kd * 0.058,
+        pr.append(Prim("ell", "cb2", 0.0, c=kn + kd * 0.058,
                        R=frame_from(kn - an, Rp[:, 0]), h=(0.062, 0.075, 0.036)))
         # cargo pocket on thigh side
         mid = hip * 0.45 + kn * 0.55
@@ -324,40 +338,68 @@ def build(J, fx=None):
     # pelvis / belt
     pr.append(Prim("ell", "camo", K, tex=(J["pel"], Rp), c=J["pel"], R=Rp,
                    h=(0.19, 0.13, 0.13)))
-    pr.append(Prim("box", "olive2", 0.0, c=J["pel"] + Rp @ np.array([0, 0.06, 0]), R=Rp,
-                   h=(0.192, 0.032, 0.135), rr=0.03))
+    # battle belt with an IFAK (left, behind) and a dump pouch (right, behind)
+    pr.append(Prim("box", "rg", 0.0, c=J["pel"] + Rp @ np.array([0, 0.06, 0]), R=Rp,
+                   h=(0.196, 0.036, 0.138), rr=0.03))
+    pr.append(Prim("box", "cb2", 0.0, c=J["pel"] + Rp @ np.array([0.13, 0.03, -0.12]), R=Rp @ eul(0, -35, 0),
+                   h=(0.035, 0.065, 0.03), rr=0.014))
+    pr.append(Prim("box", "rg", 0.0, c=J["pel"] + Rp @ np.array([-0.13, 0.01, -0.11]), R=Rp @ eul(0, 35, 0),
+                   h=(0.05, 0.05, 0.035), rr=0.02))
     # torso
     pr.append(Prim("rcone", "camo", K, tex=(J["pel"], Rc), a=J["pel"] + Rp @ np.array([0, 0.05, 0]),
                    b=J["chest"], r1=0.15, r2=0.16))
     pr.append(Prim("ell", "camo", K, tex=(J["pel"], Rc), c=J["chest"] + Rc @ np.array([0, 0.03, 0]),
                    R=Rc, h=(0.215, 0.17, 0.13)))
-    # plate carrier + pouches
+    # plate carrier (low-profile, coyote) with cummerbund, shoulder straps and front pouches
     vc = J["chest"] + Rc @ np.array([0, 0.0, 0.01])
-    pr.append(Prim("box", "olive", 0.0, c=vc, R=Rc, h=(0.19, 0.18, 0.15), rr=0.06))
-    for i, x in enumerate((-0.085, 0.0, 0.085)):
-        pr.append(Prim("box", "olive2", 0.0, c=J["chest"] + Rc @ np.array([x * 1.1, -0.07, 0.155]),
-                       R=Rc, h=(0.04, 0.066, 0.034), rr=0.014))
-    pr.append(Prim("box", "olive2", 0.0, c=J["chest"] + Rc @ np.array([0.10, 0.09, 0.15]),
-                   R=Rc @ eul(0, 0, -12), h=(0.035, 0.04, 0.022), rr=0.01))
-    # backpack
-    pr.append(Prim("box", "olive", 0.0, c=J["chest"] + Rc @ np.array([0, 0.03, -0.235]),
-                   R=Rc, h=(0.17, 0.21, 0.10), rr=0.06))
-    pr.append(Prim("box", "olive2", 0.0, c=J["chest"] + Rc @ np.array([0, -0.07, -0.335]),
-                   R=Rc, h=(0.12, 0.085, 0.035), rr=0.022))
-    pr.append(Prim("rcone", "coyote", 0.0, a=J["chest"] + Rc @ np.array([-0.17, 0.25, -0.23]),
-                   b=J["chest"] + Rc @ np.array([0.17, 0.25, -0.23]), r1=0.062, r2=0.062))
-    # neck + head
+    pr.append(Prim("box", "cb", 0.0, c=vc, R=Rc, h=(0.185, 0.175, 0.148), rr=0.05))
+    pr.append(Prim("box", "cb", 0.0, c=J["chest"] + Rc @ np.array([0, -0.105, 0.0]), R=Rc,
+                   h=(0.205, 0.062, 0.138), rr=0.045))
+    for x in (-0.11, 0.11):
+        pr.append(Prim("box", "cb2", 0.0, c=J["chest"] + Rc @ np.array([x, 0.165, 0.0]), R=Rc,
+                       h=(0.048, 0.022, 0.15), rr=0.016))
+    for x in (-0.088, 0.0, 0.088):          # triple magazine pouch (6.8 mm mags stand tall)
+        pr.append(Prim("box", "rg", 0.0, c=J["chest"] + Rc @ np.array([x, -0.07, 0.162]),
+                       R=Rc, h=(0.04, 0.075, 0.034), rr=0.014))
+    pr.append(Prim("box", "cb2", 0.0, c=J["chest"] + Rc @ np.array([0, 0.075, 0.158]),
+                   R=Rc, h=(0.105, 0.042, 0.022), rr=0.012))                  # admin pouch
+    pr.append(Prim("rcone", "black", 0.0, a=J["chest"] + Rc @ np.array([0.085, 0.14, 0.15]),
+                   b=J["chest"] + Rc @ np.array([0.145, 0.14, 0.13]), r1=0.019, r2=0.019))  # tourniquet
+    # assault pack, radio and whip antenna
+    pr.append(Prim("box", "cb", 0.0, c=J["chest"] + Rc @ np.array([0, 0.02, -0.23]),
+                   R=Rc, h=(0.15, 0.19, 0.085), rr=0.05))
+    pr.append(Prim("box", "cb2", 0.0, c=J["chest"] + Rc @ np.array([0, -0.08, -0.318]),
+                   R=Rc, h=(0.11, 0.075, 0.03), rr=0.02))
+    rad = J["chest"] + Rc @ np.array([0.10, 0.17, -0.20])
+    pr.append(Prim("box", "black", 0.0, c=rad, R=Rc, h=(0.036, 0.07, 0.032), rr=0.01))
+    pr.append(Prim("rcone", "black", 0.0, a=rad + Rc @ np.array([0, 0.06, 0]),
+                   b=rad + Rc @ np.array([0.03, 0.13, -0.16]), r1=0.011, r2=0.008))
+    # neck + head: ballistic glasses, comms headset, high-cut helmet with NVG mount and ENVG-B (up)
     pr.append(Prim("rcone", "skin", K, a=J["neck"] - up_c * 0.03, b=J["head"] - Rh[:, 1] * 0.04,
                    r1=0.065, r2=0.06))
     pr.append(Prim("ell", "skin", K, c=J["head"], R=Rh, h=(0.096, 0.112, 0.105)))
     pr.append(Prim("sph", "skin", 0.0, c=J["head"] + Rh @ np.array([0, -0.015, 0.106]), r1=0.022))
     pr.append(Prim("box", "lens", 0.0, c=J["head"] + Rh @ np.array([0, 0.02, 0.088]), R=Rh,
                    h=(0.078, 0.021, 0.02), rr=0.013))
+    for x in (-0.1, 0.1):
+        pr.append(Prim("ell", "rg", 0.0, c=J["head"] + Rh @ np.array([x, -0.005, 0.0]), R=Rh,
+                       h=(0.03, 0.05, 0.044)))
     hel_c = J["head"] + Rh @ np.array([0, 0.036, -0.016])
-    cut_n = nrm(np.array([0, 1.0, 0.62]))
-    pr.append(Prim("sph", "olive", 0.0, c=hel_c, R=Rh, r1=0.140, cut=(cut_n, -0.018)))
-    pr.append(Prim("box", "olive2", 0.0, c=hel_c + Rh @ np.array([0, 0.03, -0.128]), R=Rh,
-                   h=(0.035, 0.025, 0.02), rr=0.012))
+    cut_n = nrm(np.array([0, 1.0, 0.5]))
+    pr.append(Prim("sph", "camo", 0.0, tex=(hel_c, Rh), c=hel_c, R=Rh, r1=0.140, cut=(cut_n, -0.004)))
+    for x in (-0.128, 0.128):               # side rails
+        pr.append(Prim("box", "black", 0.0, c=hel_c + Rh @ np.array([x, 0.0, 0.0]), R=Rh,
+                       h=(0.01, 0.016, 0.065), rr=0.005))
+    Rn = Rh @ eul(-28, 0, 0)
+    pr.append(Prim("box", "black", 0.0, c=hel_c + Rh @ np.array([0, 0.03, 0.132]), R=Rn,
+                   h=(0.032, 0.024, 0.012), rr=0.006))                         # NVG shroud
+    pr.append(Prim("box", "nvg", 0.0, c=hel_c + Rh @ np.array([0, 0.032, 0.152]), R=Rh @ eul(-55, 0, 0),
+                   h=(0.058, 0.024, 0.028), rr=0.012))                         # ENVG-B, flipped up
+    for x in (-0.032, 0.032):
+        pr.append(Prim("rcone", "nvg", 0.0, a=hel_c + Rh @ np.array([x, 0.026, 0.166]),
+                       b=hel_c + Rh @ np.array([x, 0.054, 0.164]), r1=0.019, r2=0.017))
+    pr.append(Prim("box", "cb2", 0.0, c=hel_c + Rh @ np.array([0, 0.035, -0.13]), R=Rh @ eul(25, 0, 0),
+                   h=(0.048, 0.032, 0.022), rr=0.012))                         # battery / counterweight
     # arms
     for s, sx in (("L", 1), ("R", -1)):
         sh, el, wr = J["sh" + s], J["el" + s], J["wr" + s]
@@ -370,17 +412,17 @@ def build(J, fx=None):
     # rifle
     go, gR = J["gun_o"], J["gun_R"]
     G = lambda v: go + gR @ (np.asarray(v, float) * GS)
-    pr.append(Prim("box", "gun", 0.0, c=G((0, -0.01, 0.08)), R=gR, h=(0.0253, 0.0575, 0.1035), rr=0.018))
-    pr.append(Prim("box", "gun", 0.0, c=G((0, 0.0, 0.29)), R=gR, h=(0.0299, 0.0437, 0.1495), rr=0.01))
-    pr.append(Prim("box", "gunlt", 0.0, c=G((0, -0.005, 0.5)), R=gR, h=(0.0333, 0.0368, 0.1035), rr=0.012))
-    pr.append(Prim("rcone", "gun", 0.0, a=G((0, 0.005, 0.58)), b=go + gR @ MUZZLE, r1=0.016, r2=0.016))
-    pr.append(Prim("box", "gun", 0.0, c=G((0, -0.1, 0.33)), R=gR @ eul(12, 0, 0),
-                   h=(0.0184, 0.0747, 0.0310), rr=0.008))
-    pr.append(Prim("box", "gun", 0.0, c=G((0, -0.065, 0.2)), R=gR @ eul(-18, 0, 0),
-                   h=(0.0184, 0.0517, 0.0230), rr=0.008))
-    pr.append(Prim("box", "gun", 0.0, c=G((0, 0.06, 0.3)), R=gR, h=(0.0230, 0.0299, 0.0633), rr=0.012))
-    pr.append(Prim("box", "lens", 0.0, c=G((0, 0.062, 0.358)), R=gR, h=(0.0184, 0.0207, 0.0046),
-                   rr=0.003))
+    pr.append(Prim("box", "fde", 0.0, c=G((0, -0.01, 0.08)), R=gR, h=(0.0235, 0.055, 0.1035), rr=0.018))   # stock
+    pr.append(Prim("box", "fde", 0.0, c=G((0, 0.0, 0.29)), R=gR, h=(0.0299, 0.0437, 0.1495), rr=0.01))     # receiver
+    pr.append(Prim("box", "fde", 0.0, c=G((0, -0.004, 0.47)), R=gR, h=(0.0333, 0.0368, 0.10), rr=0.012))    # handguard
+    pr.append(Prim("rcone", "can", 0.0, a=G((0, 0.003, 0.585)), b=go + gR @ MUZZLE, r1=0.024, r2=0.024))  # suppressor
+    pr.append(Prim("box", "black", 0.0, c=G((0, -0.105, 0.335)), R=gR @ eul(10, 0, 0),
+                   h=(0.0184, 0.085, 0.034), rr=0.008))                                                  # magazine
+    pr.append(Prim("box", "black", 0.0, c=G((0, -0.065, 0.2)), R=gR @ eul(-18, 0, 0),
+                   h=(0.0184, 0.0517, 0.0230), rr=0.008))                                                # grip
+    pr.append(Prim("box", "black", 0.0, c=G((0, 0.072, 0.30)), R=gR, h=(0.026, 0.036, 0.09), rr=0.014))  # fire-control optic
+    pr.append(Prim("box", "lens", 0.0, c=G((0, 0.075, 0.38)), R=gR, h=(0.021, 0.024, 0.004), rr=0.004))
+    pr.append(Prim("box", "fde", 0.0, c=G((0, 0.047, 0.50)), R=gR, h=(0.022, 0.017, 0.042), rr=0.006))   # laser / light
     # ejected casing
     if fx.get("casing") is not None:
         cp, ang = fx["casing"]
