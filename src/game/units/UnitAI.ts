@@ -8,6 +8,14 @@ import { STRUCTURES } from "../data";
 import { Squad, squadOf, liveMembers, squadOrders, SQUAD_ORDERS, angDiff } from "./Squads";
 
 const TURN = 7;
+/** infantry bring the rifle round to the target at this rate (rad/s) and only fire once it points within
+ * AIM_TOL of it, so every shot leaves a rifle (and a sprite) facing the target */
+const AIM_TURN = 7, AIM_TOL = 0.12;
+/** the sights settle on a new target for this long (s) before the first shot (the figure turns with it) */
+const AIM_STEADY = 0.08;
+/** after a target drops, a soldier keeps his rifle on that spot this long (s) (on the move too, if he fires
+ * on the move), so it doesn't swing away and straight back when the next target turns up there */
+const AIM_HOLD = 0.8;
 /** orders that pull one soldier out of his squad until the job is done */
 const TASK_ORDERS = new Set(["interact", "build", "clear"]);
 
@@ -123,6 +131,7 @@ export function updateUnits(g: Game, dt: number) {
 export function canFireWhileMoving(u: Unit) { return !u.wid || !["sniper", "rocket", "lmg"].includes(u.wid) || u.vehicle; }
 
 function updateUnit(g: Game, u: Unit, dt: number) {
+  const x0 = u.x, y0 = u.y;   // (the way he really moves this step: where the rifle points between targets)
   u.suppression = Math.max(0, u.suppression - dt * 0.22);
   u.cool = Math.max(-1, u.cool - dt); u.hitT = Math.max(0, u.hitT - dt); u.flashT = Math.max(0, u.flashT - dt);
   if (u.burn > 0) { u.burn -= dt; g.damage(u, 8 * dt, null, "fire"); if (!u.alive) return; }
@@ -184,12 +193,27 @@ function updateUnit(g: Game, u: Unit, dt: number) {
     goTo(g, u, px, py);
   }
   u.moving = moved;
+  if (dt > 0) { const k = Math.min(1, dt * 4); u.svx += ((u.x - x0) / dt - u.svx) * k; u.svy += ((u.y - y0) / dt - u.svy) * k; }
   // ---- face and fire
   if (engaging) {
     const want = Math.atan2(tgt.y - u.y, tgt.x - u.x);
     if (!moved || u.vehicle) u.heading = turn(u.heading, want, dt * TURN);
-    if (!moved || canFireWhileMoving(u)) fire(g, u, tgt, moved);
+    const firesNow = !moved || canFireWhileMoving(u);
+    u.aimT = g.time;
+    if (isNaN(u.aimH)) u.aimH = u.heading;
+    // the rifle comes round only when he can shoot (a sniper walking away keeps it the way he walks)
+    u.aimH = turn(u.aimH, firesNow ? want : bodyFacing(u), dt * AIM_TURN);
+    const onTarget = u.vehicle || Math.abs(Math.atan2(Math.sin(want - u.aimH), Math.cos(want - u.aimH))) <= AIM_TOL;
+    u.aimSteady = firesNow && onTarget ? u.aimSteady + dt : 0;
+    if (firesNow && onTarget && (u.vehicle || u.aimSteady >= AIM_STEADY)) fire(g, u, tgt, moved);
   } else if (!moved && o.kind === "formation" && !isNaN(u.slotFace)) u.heading = turn(u.heading, u.slotFace, dt * 3);
+  // between targets the rifle points where the body faces: the way he walks (as the sprite shows him)
+  // or his heading, so the next target's aim starts from there and comes round before the first shot
+  if (!engaging) {
+    u.aimSteady = 0;
+    if (isNaN(u.aimH)) u.aimH = u.heading;
+    else if ((moved && !canFireWhileMoving(u)) || g.time - u.aimT > AIM_HOLD) u.aimH = turn(u.aimH, bodyFacing(u), dt * AIM_TURN);
+  }
   // ---- roles
   if (u.def.heal) medic(g, u, dt);
   if (u.vehicle) vehicle(g, u, dt);
@@ -200,6 +224,9 @@ function nextOrder(g: Game, u: Unit) {
   const n = u.queue.shift();
   if (n) start(g, u, n); else { u.order = { kind: "idle" }; u.path = null; }
 }
+/** where the body faces: the way he is seen to walk (smoothed velocity, as his sprite shows him) or his
+ * heading. Between targets the rifle swings round to it (never jumps), so a new target's aim starts there */
+const bodyFacing = (u: Unit) => (u.moving && Math.hypot(u.svx, u.svy) > 0.8 ? Math.atan2(u.svy, u.svx) : u.heading);
 const turn = (a: number, b: number, k: number) => { let d = b - a; while (d > Math.PI) d -= Math.PI * 2; while (d < -Math.PI) d += Math.PI * 2; return a + clamp(d, -k, k); };
 
 function acquire(g: Game, u: Unit) {
@@ -234,6 +261,9 @@ function acquire(g: Game, u: Unit) {
     const n = g.targeted.get(z.id) || 0;
     if (n && d > 6 && !z.def.boss) sc += n * (z.hp < 120 ? 6 : 3);
     if (!isNaN(sector) && d > 7 && Math.abs(angDiff(sector, Math.atan2(z.y - u.y, z.x - u.x))) > 1.4) sc += 14;
+    // infantry prefer the next target near where the rifle already points (a quick swing, not a spin
+    // round and back); 3 m per radian, so a threat much closer behind him still comes first
+    if (!u.vehicle && !isNaN(u.aimH) && d > 4) sc += Math.abs(angDiff(u.aimH, Math.atan2(z.y - u.y, z.x - u.x))) * 3;
     cand.push([sc, z]);
   });
   cand.sort((a, b) => a[0] - b[0]);
