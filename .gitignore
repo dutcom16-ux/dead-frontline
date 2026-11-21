@@ -3,3 +3,5 @@ dist/
 .dev/
 *.log
 .vercel
+tools/soldier3d/out/
+__pycache__/
