@@ -14,6 +14,11 @@ licence here: the Vercel site is public, so the sheets must be ones you may redi
 | `infected_soldier8.*` | `zombie_soldier_8dir.png` (8089.png) | soldiers who turned into infected |
 | `zombies.*` | `squad_zombie_sheet.png` (8086.png) | the infected |
 | `effects.*` | `troops_sheet.png` (8085.png) | explosion, smoke, blood, sparks |
+| not cut yet | `desert_soldier/soldier_16dir_*.png` (rendered by `tools/soldier3d/`, free to redistribute) | not used yet: desert-camo rifleman in 16 directions, with idle, walk, fire and death clips |
+
+The desert soldier sheets are described in `assets/source/desert_soldier/README.md`. Unlike the drawn
+sheets, they have south-east art and all 16 directions, and every frame is rendered from one rig at one
+size with the feet at the same point.
 
 ## Military personnel sheet (`public/sprites/military8.*`)
 
