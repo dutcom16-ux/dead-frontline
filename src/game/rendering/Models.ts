@@ -101,11 +101,12 @@ export function crawlerGeo(): Geo {
   g.box(-0.34, 0, 0.1, -0.24, 0.3, 0.75, sk); g.box(0.24, 0, 0.1, 0.34, 0.3, 0.75, sk);
   return g;
 }
-export function abominationGeo(): Geo {
-  const g = new G(); const sk: C3 = [0.55, 0.32, 0.3];
-  g.box(-0.3, 0, -0.25, -0.08, 0.8, 0.2, sk); g.box(0.08, 0, -0.25, 0.3, 0.8, 0.2, sk);
+export function abominationGeo(step = 0): Geo {
+  // `step` = -1..1: left foot forward / back (right one opposite), arms swinging against the legs
+  const g = new G(); const sk: C3 = [0.55, 0.32, 0.3], st = step * 0.24;
+  g.skewBox(-0.3, 0, -0.25, -0.08, 0.8, 0.2, st, sk); g.skewBox(0.08, 0, -0.25, 0.3, 0.8, 0.2, -st, sk);
   g.ball(0, 1.25, -0.05, 0.62, W, 5, 10); g.ball(0.25, 1.55, 0.25, 0.32, sk, 3, 8); g.ball(-0.3, 1.5, -0.2, 0.35, W, 3, 8);
-  g.box(-0.85, 0.5, -0.1, -0.55, 1.6, 0.2, sk); g.box(0.55, 0.5, -0.1, 0.95, 1.7, 0.25, sk);
+  g.skewBox(-0.85, 0.5, -0.1, -0.55, 1.6, 0.2, -st * 0.5, sk); g.skewBox(0.55, 0.5, -0.1, 0.95, 1.7, 0.25, st * 0.5, sk);
   return g;
 }
 export function corpseGeo(): Geo { const g = new G(); g.box(-0.22, 0.02, -0.85, 0.22, 0.24, 0.55, W); g.box(-0.11, 0.02, 0.55, 0.11, 0.2, 0.78, [0.45, 0.4, 0.35]); return g; }
@@ -146,7 +147,8 @@ export function boatGeo(): Geo { const g = new G(); g.box(-1.6, 0, -5.5, 1.6, 1.
 export const MODELS: Record<string, () => Geo> = {
   soldier: soldierGeo, heavy: heavyGeo, launcher: launcherGeo, flamer: flamerGeo, civilian: () => civilianGeo(0),
   civilian_l: () => civilianGeo(1), civilian_r: () => civilianGeo(-1),
-  zombie: zombieGeo, brute: bruteGeo, bloater: bloaterGeo, crawler: crawlerGeo, abomination: abominationGeo,
+  zombie: zombieGeo, brute: bruteGeo, bloater: bloaterGeo, crawler: crawlerGeo, abomination: () => abominationGeo(0),
+  abomination_l: () => abominationGeo(1), abomination_r: () => abominationGeo(-1),
   corpse: corpseGeo, blood: bloodGeo, ring: ringGeo, objmarker: markerGeo, beacon: beaconGeo, flash: flashGeo, blast: blastGeo,
   fire: fireGeo, crate: crateGeo, wreck: wreckGeo, wire: wireGeo, light: lightGeo, turret: turretGeo, antenna: antennaGeo, flag: flagGeo,
   jeep: jeepGeo, apc: apcGeo, ifv: ifvGeo, tank: tankGeo, truck: truckGeo, arv: arvGeo, heli: heliGeo, boat: boatGeo,

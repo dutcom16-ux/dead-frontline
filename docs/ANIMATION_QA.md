@@ -116,7 +116,12 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
     16 frames a second (now the legs hold their pose during the leap).
   * Tested (`test/units.mjs` 80/80): all seven types walk out in 8 directions, stand, sprint in from
     30 m, attack, and die; cadence, standing stance, views, clips, hits and deaths per type.
-- [ ] Abomination: A1 walking legs; test
+- [x] Abomination: A1 walking legs; test
+  * Three 3D poses (feet together, left foot forward, right foot forward, arms swinging against the
+    legs) alternate with the distance walked: one step per 1.5 m at its size. The step bob is gone,
+    so its feet stay on the ground; it stands with its feet together as soon as it stops.
+  * Tested (`test/units.mjs`): 8 steps over 11.3 m, both legs, feet on the ground, feet together when
+    stopped.
 - [ ] Turned soldier: retest
 - [ ] Survivors: retest
 - [ ] Vehicles and transports: confirmed unchanged

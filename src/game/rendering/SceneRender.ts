@@ -82,8 +82,18 @@ export class SceneRender {
         // 3D infected (the abomination, or all if the sheet is missing): a heavy step bob that follows
         // the distance walked, not the clock (no bobbing in place)
         if (!this.sprites.coversZombie(z)) {
-          const bob = Math.abs(Math.sin(this.stride(z.id, z.x, z.y, time, 1.1 * z.def.size) * Math.PI)) * 0.05 * z.def.size;
-          this.put("m_" + (UNIT_MODEL[z.type] || "zombie"), z.x, z.y, z.z + bob, rotFor(z.heading), col, z.def.size);
+          const model = UNIT_MODEL[z.type] || "zombie";
+          const ph = this.stride(z.id, z.x, z.y, time, 0.55 * z.def.size);
+          if (model === "abomination") {
+            // the abomination steps: left foot forward, together, right foot forward, together; feet on the ground
+            const q = ph - Math.floor(ph), moving = time - (this.strides.get(z.id)?.mt ?? -9) < 0.15;
+            const m = !moving || q < 0.25 || q >= 0.75 ? "m_abomination" : Math.floor(ph) % 2 ? "m_abomination_r" : "m_abomination_l";
+            this.put(m, z.x, z.y, z.z, rotFor(z.heading), col, z.def.size);
+          } else {
+            // the 3D fallback figures (only if the sprite sheet is missing) have no leg poses: a step bob
+            const bob = Math.abs(Math.sin(ph * Math.PI)) * 0.05 * z.def.size;
+            this.put("m_" + model, z.x, z.y, z.z + bob, rotFor(z.heading), col, z.def.size);
+          }
         }
         if (b) this.put("m_fire", z.x, z.y, z.z, T * 4 + z.id, [1.4, 0.6, 0.15], 0.5 * z.def.size);
         if (ui.hover === z.id || focusIds.has(z.id)) this.put("m_ring", z.x, z.y, z.z, 0, C.focus, z.def.size * 1.1);

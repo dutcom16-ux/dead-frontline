@@ -182,6 +182,23 @@ const r = await page.evaluate(() => {
       }
     }
   }
+  // ---- 5b. the abomination (3D): steps while walking, feet on the ground, feet together when it stops
+  const ab = g.addZombie("abomination", C2[0], C2[1] + 14) || g.addZombie("abomination", C[0], C[1] - 20);
+  const abLog = [], abInfo = { made: !!ab };
+  if (ab) {
+    // walked by hand at its chase pace (the boss's own AI waits for its trigger)
+    ab.state = "idle"; ab.awake = false;
+    const [vx, vy] = mapDir(80), x0 = ab.x, y0 = ab.y;
+    focus = [ab.x, ab.y];
+    for (let j = 0; j < 240; j++) {
+      const k = Math.min(j, 180);
+      step(1 / 30, () => { ab.x = x0 + vx * 1.9 * k / 30; ab.y = y0 + vy * 1.9 * k / 30; ab.state = "idle"; });
+      A.render.render(g, cam, g.time, ui);
+      for (const [m, l] of A.render.lists) for (const it of l) if (/^m_abomination/.test(m) && Math.abs(it.x - ab.x) < 1e-6 && Math.abs(it.y - ab.y) < 1e-6) abLog.push({ j, m, x: ab.x, y: ab.y, dz: it.z - ab.z });
+      if (j === 5) abInfo.keys = [...A.render.lists.keys()].filter((k) => A.render.lists.get(k).length).join(","), abInfo.pos = [ab.x, ab.y, ab.dead, g.zombies.includes(ab)];
+    }
+    ab.dead = true; g.compact();
+  }
   // ---- 6. crowd: 200 infected and the squad, moving and fighting
   for (const c of civs) c.state = "gone";
   pins.length = 0; T0.x = L.x - 60; T0.y = L.y; focus = C;
@@ -195,7 +212,7 @@ const r = await page.evaluate(() => {
   step(6);
   const crowdMs = drawMs / draws, crowdN = g.zombies.filter((z) => !z.dead).length;
   for (const z of crowd) if (!z.dead && Math.random() < 0.7) g.damage(z, 1e9, null, "bullet");
-  step(5);
+  step(7);   // state is freed on the first sweep (every 3 s) after a body is 3 s old
   const animSize = sp.anim.size, alive = g.zombies.filter((z) => !z.dead).length + g.units.filter((u) => u.alive).length + g.civs.filter((c) => !c.dead).length;
 
   // ---------------- metrics
@@ -290,7 +307,11 @@ const r = await page.evaluate(() => {
     let changes = 0; for (let j = 1; j < mv.length; j++) if (mv[j].m !== mv[j - 1].m) changes++;
     return { left: mv.some((q) => q.m === "m_civilian_l"), right: mv.some((q) => q.m === "m_civilian_r"), changes, still: st.every((q) => q.m === "m_civilian") && st.length > 10 };
   });
-  return { per, deaths, civ3d, missing, crowdMs, crowdN, animSize, alive };
+  let abDist = 0, abSteps = 0;
+  for (let j = 1; j < abLog.length; j++) { if (abLog[j].j < 180) abDist += Math.hypot(abLog[j].x - abLog[j - 1].x, abLog[j].y - abLog[j - 1].y); if (abLog[j].m !== abLog[j - 1].m && abLog[j].m !== "m_abomination") abSteps++; }
+  const abo = { info: abInfo, frames: abLog.length, left: abLog.some((q) => q.m === "m_abomination_l"), right: abLog.some((q) => q.m === "m_abomination_r"), dist: abDist, steps: abSteps,
+    ground: abLog.every((q) => Math.abs(q.dz) < 1e-6), still: abLog.filter((q) => q.j > 195).every((q) => q.m === "m_abomination") };
+  return { per, deaths, civ3d, abo, missing, crowdMs, crowdN, animSize, alive };
 });
 
 const ok = (c) => (c ? "PASS" : "FAIL");
@@ -310,6 +331,8 @@ const byKind = {};
 for (const d of r.deaths) (byKind[d.kind] ||= []).push(d);
 for (const [k, ds] of Object.entries(byKind)) checks.push([ds.every((d) => d.ok), `${k}: death plays once and the body stays (${ds.length}): ${[...new Set(ds.map((d) => d.info))].join("; ")}`]);
 checks.push([r.civ3d.length > 0 && r.civ3d.every((c) => c.left && c.right && c.changes >= 6 && c.still), `3D survivors alternate their steps while walking and stand with feet together: ${r.civ3d.map((c) => c.changes).join(",")} step changes`]);
+{ const a = r.abo; const per = a.steps ? a.dist / a.steps : 0;
+  checks.push([a.frames > 200 && a.left && a.right && per > 1.0 && per < 2.0 && a.ground && a.still, `abomination (3D) steps left and right while walking (${a.steps} steps over ${a.dist.toFixed(1)} m: ${per.toFixed(2)} m a step), feet on the ground ${a.ground}, feet together when it stops ${a.still}${a.frames ? '' : ' ' + JSON.stringify(a.info)}`]); }
 checks.push([r.missing === 0, `every requested clip/frame exists: ${r.missing} missing`]);
 checks.push([r.crowdMs < 40, `crowd of ${r.crowdN} infected plus the squad: ${r.crowdMs.toFixed(1)} ms per drawn frame (software rendering)`]);
 checks.push([r.animSize <= r.alive + 60, `animation state is freed for the dead: ${r.animSize} entries for ${r.alive} living figures`]);
