@@ -82,7 +82,7 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
 
 | Test | Result |
 |---|---|
-| `test/anim.mjs` (soldiers) | 18/18 |
+| `test/anim.mjs` (soldiers) | 18/18 (35 checks after the per-class tests were added) |
 | `test/units.mjs` (other units) | 65/65; crowd of 200 infected: 1.5 ms per drawn frame |
 | `test/formations.mjs` | 20/20 |
 | Playthrough low | 16/16; liberated at 61 min, 255 killed, 1 loss |
@@ -93,7 +93,17 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
 
 - [x] Phase 1: audit and inventory (this file)
 - [x] Phase 2: checkpoint tag, baseline recorded
-- [ ] Soldiers: S1 automatic fire, S2 south-east fallback, S3 breathing; test every class
+- [x] Soldiers: S1 automatic fire, S2 south-east fallback, S3 breathing; test every class
+  * S1: weapons firing faster than every 0.25 s (carbine, SMG, special-forces rifle, machine gun,
+    flamethrower) hold the shot frame through a burst, with the flash on every round, and recoil
+    once when the burst ends: 0 pose changes a second while firing (were 7–12). Rifle, sniper rifle,
+    shotgun and rocket kick once per shot (shot, recoil, aim).
+  * S2: south-east uses the sheet's own south-east groups as drawn (facing east, rifle tilted down,
+    right hand) instead of south-west mirrored; muzzle flash direction set to that rifle.
+  * S3: breathing stretches the figure from the feet by 0.6 %; the feet no longer move.
+  * Tested (`test/anim.mjs` 35/35): all 10 classes fire at a target (flash rules, steadiness) and move
+    past it (firing stance for classes that fire on the move, walk for machine gun, sniper and rocket);
+    8-direction firing and walking; dying in 8 views; march and fight.
 - [ ] Infected: Z1 standing frame, Z2 speed of loops; test every type
 - [ ] Abomination: A1 walking legs; test
 - [ ] Turned soldier: retest

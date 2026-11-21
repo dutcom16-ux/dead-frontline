@@ -426,10 +426,6 @@ def anchor_lying(im):
     a = np.asarray(im); ys, xs = np.nonzero(a[..., 3] > 128)
     return (float((xs.min() + xs.max()) / 2), float(ys.max() + 1 - 0.45 * (ys.max() - ys.min())))
 
-def mirror(item):
-    im, (ax, ay), mz, k = item
-    return (im.transpose(Image.FLIP_LEFT_RIGHT), (im.width - ax, ay), (im.width - 1 - mz[0], mz[1]) if mz != (0, 0) else mz, k)
-
 print("military8")
 walkB = m_boxes(115, 262, 60, 1)
 fireB = m_boxes(412, 582, 128, 0)
@@ -480,12 +476,12 @@ for g, d in enumerate(MDIRS):
     ditems = [(im, anchor_stand(im), (0, 0), kd) for im in D[:4]] + [(im, anchor_lying(im), (0, 0), kd) for im in D[4:]]
     clips[d] = {"walk": [witems[i] for i in cycle], "idle": [witems[p]], "fire": [fitems[aim], fitems[shot], fitems[recoil]], "die": ditems}
     report.append(f"  {d:2s}: walk {[round(h) for h in hw]} px (x{kd:.3f}), cycle {cycle}; fire order aim/shot/recoil {aim}/{shot}/{recoil}; dying x{kdie:.2f}")
-# SE: the sheet's SE groups face east; use SW mirrored (see note above)
-clips["SE_sheet"] = clips["SE"]
-clips["SE"] = {k: [mirror(it) for it in v] for k, v in clips["SW"].items()}
+# SE: the sheet's SE groups are drawn facing east, rifle tilted slightly down (no three-quarter
+# front-right art). They are used as drawn: mirroring the SW groups instead would put the rifle in
+# the left hand in this one view. (Fallback for missing art: see docs/ANIMATION_QA.md, S9.)
 for d in MDIRS:
     for k in ("walk", "idle", "fire", "die"):
         M8.add(f"{k}_{d}", clips[d][k])
 M8.save(os.path.join(OUT, "military8.png"), os.path.join(OUT, "military8.json"),
-        "user-supplied Military_Soldier_Sprite_Sheet.png; SE = SW mirrored (the sheet's SE is drawn facing east); tools/slice_sprites.py", round(H0))
-print("\n".join(report)); print(f"  standing height {H0:.0f} px; sheet SE frames not used: {len(clips['SE_sheet']['walk']) - 1 + 3 + 6} (drawn facing east)")
+        "user-supplied Military_Soldier_Sprite_Sheet.png; SE as drawn (facing east, no SE art); tools/slice_sprites.py", round(H0))
+print("\n".join(report)); print(f"  standing height {H0:.0f} px; SE groups used as drawn (facing east)")

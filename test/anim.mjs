@@ -62,7 +62,7 @@ const r = await page.evaluate(async () => {
       const vx = (f.mx - f.ax) / ref, vy = (f.my - f.ay) / ref;          // from the feet, in figure heights (y down)
       const on = alphaNear(f.x + f.mx, f.y + f.my) > 100;
       const ok = { N: vy < -0.95 && Math.abs(vx) < 0.2, S: Math.abs(vx) < 0.15 && vy < -0.45 && vy > -0.8, E: vx > 0.25, W: vx < -0.25,
-        NE: vx > 0.05 && vy < -0.95, NW: vx < -0.05 && vy < -0.95, SE: vx > 0.15 && vy > -0.8, SW: vx < -0.15 && vy > -0.8 }[d];
+        NE: vx > 0.05 && vy < -0.95, NW: vx < -0.05 && vy < -0.95, SE: vx > 0.25 && vy > -1.0, SW: vx < -0.15 && vy > -0.8 }[d];   // (SE art is drawn facing east)
       if (!ok || !on) tipBad.push(`${d} tip (${vx.toFixed(2)}, ${vy.toFixed(2)}) on rifle ${on}`);
     }
   }
@@ -226,6 +226,35 @@ const r = await page.evaluate(async () => {
     A.__issue(g, [S0], { kind: "hold" }, {});
   }
 
+  // ---------------- every class: firing at a target, then moving past it
+  const CLASSES = ["rifleman", "assault", "sniper", "machine_gunner", "shotgunner", "flamethrower", "rocket", "medic", "engineer", "special_forces"];
+  out.classes = {};
+  for (const [k, cls] of CLASSES.entries()) {
+    const u = g.addUnit(cls, home[0], home[1] + 4); u.x = home[0]; u.y = home[1] + 4;
+    A.__issue(g, [u], { kind: "hold" }, {});
+    const [vx, vy] = mapDir((k * 37) % 360);
+    const z = g.addZombie("walker", u.x + vx * 10, u.y + vy * 10);
+    z.hp = z.maxHp = 1e7; z.awake = true; z.state = "idle";
+    follow = { u, pins: [[z, z.x, z.y]] };
+    step(1);
+    const t0 = g.time;
+    step(3);
+    const seq = (log.get(u.id) || []).filter((q) => q.t > t0);
+    let flips = 0, firingT = 0;
+    for (let j = 1; j < seq.length; j++) { if (seq[j].state === "fire") firingT += seq[j].t - seq[j - 1].t; if (/^fire_/.test(seq[j].anim) && /^fire_/.test(seq[j - 1].anim) && seq[j].i !== seq[j - 1].i) flips++; }
+    const shots = seq.length ? seq[seq.length - 1].shotN - seq[0].shotN : 0;
+    // then walk past the target while it is in sight
+    const p = [u.x - vx * 12, u.y - vy * 12];
+    A.__issue(g, [u], { kind: "move", x: p[0], y: p[1] }, {});
+    const t1 = g.time;
+    step(2.5);
+    const mv = (log.get(u.id) || []).filter((q) => q.t > t1 + 0.4 && q.moving && q.eng);
+    out.classes[cls] = { wid: u.wid, shots, flashes: seq.filter((q) => q.flash).length, fireClips: [...new Set(seq.filter((q) => q.state === "fire").map((q) => q.anim))].length,
+      changesPerS: firingT > 0 ? flips / firingT : 0, movingEng: mv.length, movingFire: mv.filter((q) => /^fire_/.test(q.anim)).length, movingWalk: mv.filter((q) => /^walk_/.test(q.anim)).length };
+    z.dead = true; follow.pins = []; u.x += 300; A.__issue(g, [u], { kind: "hold" }, {}); g.compact();
+    step(0.3);
+  }
+
   // ---------------- dying in eight views
   const extra = [];
   for (let k = 0; k < 8; k++) { const u = g.addUnit("rifleman", home[0] + (k % 4) * 3 - 4, home[1] + Math.floor(k / 4) * 3); A.__issue(g, [u], { kind: "hold" }, {}); extra.push(u); }
@@ -269,6 +298,14 @@ const checks = [
   [r.ways.fire.N && r.ways.fire.N.tip && r.ways.fire.N.tip[1] < -0.9 && r.ways.fire.S && r.ways.fire.S.tip && r.ways.fire.S.tip[1] > -0.8, `north firing stance flashes above the head, south stance at the chest: N ${r.ways.fire.N && r.ways.fire.N.tip}, S ${r.ways.fire.S && r.ways.fire.S.tip}`],
   [walkWays.length === 8 && walkWays.every(([d, w]) => w.frames > 30 && w.share >= 0.8), `walking in all 8 directions uses that direction's cycle: ${walkWays.map(([d, w]) => `${d}:${Math.round(w.share * 100)}%`).join(" ")}`],
   [r.dying.length === 8 && r.dying.every((q) => q.anims.length === 1 && q.anims[0] === q.want && q.first === 0 && q.mono && q.lastAt !== null && q.lastAt <= 0.7 && q.held), `dying in 8 views plays once and holds the last frame: ${r.dying.map((q) => `${q.anims[0]}@${q.lastAt}s`).join(" ")}`],
+  // automatic weapons hold the rifle steady through a burst; single shots kick once each (shot, recoil, aim)
+  ...Object.entries(r.classes).map(([cls, c]) => { const auto = ["carbine", "smg", "sf_rifle", "lmg", "flamer"].includes(c.wid), perShot = c.shots ? c.changesPerS * 3 / c.shots : 0;
+    return [c.shots > 0 && c.fireClips >= 1 && (c.wid === "flamer" ? c.flashes === 0 : c.flashes >= c.shots) && (auto ? c.changesPerS <= 1 : perShot <= 3.2),
+    `${cls} (${c.wid}): ${c.shots} shots, ${c.flashes} flash frames${c.wid === "flamer" ? " (flame, no muzzle flash)" : ""}, ${auto ? `held steady through bursts (${c.changesPerS.toFixed(1)} pose changes/s)` : `one kick per shot (${perShot.toFixed(1)} pose changes per shot)`}`]; }),
+  ...Object.entries(r.classes).filter(([, c]) => c.movingEng > 5).map(([cls, c]) => {
+    const moveFire = !["sniper", "rocket", "lmg"].includes(c.wid);
+    return [moveFire ? c.movingFire === c.movingEng : c.movingWalk === c.movingEng, `${cls} moving past a target: ${moveFire ? "firing stance (fires on the move)" : "walks (cannot fire on the move)"}: ${moveFire ? c.movingFire : c.movingWalk}/${c.movingEng} frames`];
+  }),
   [r.deadPoses === 0 && r.dying.every((q) => !q.stateKept), `no walking/firing pose for a dead soldier: ${r.deadPoses}`],
   [r.missing === 0, `every requested clip/frame exists: ${r.missing} missing`],
   [errors.length === 0, `page errors: ${errors.length} ${errors.slice(0, 2).join(" | ")}`],

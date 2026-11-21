@@ -34,12 +34,15 @@ const COMPASS: Dir8[] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 /** the infected soldier's walk clips ramp from standing to a full stride: play them back and forth */
 const STRIDE = [1, 2, 3, 4, 3, 2];
 /** rifle direction on screen for each view (x right, y down); S points at the viewer, N away */
-const RIFLE: Record<Dir8, [number, number]> = { N: [0, -1], NE: [0.6, -0.8], E: [1, 0], SE: [0.94, 0.34], S: [0, 1], SW: [-0.94, 0.34], W: [-1, 0], NW: [-0.6, -0.8] };
+const RIFLE: Record<Dir8, [number, number]> = { N: [0, -1], NE: [0.6, -0.8], E: [1, 0], SE: [0.97, 0.25], S: [0, 1], SW: [-0.94, 0.34], W: [-1, 0], NW: [-0.6, -0.8] };
 const HUMAN_M = 1.8 * 1.3;   // figures are drawn a little larger than life so they read at RTS zoom
 const TINTS: Record<string, string> = { bloater: "rgba(150,175,40,0.42)", brute: "rgba(30,18,12,0.38)", screamer: "rgba(235,215,225,0.30)", mutant: "rgba(150,25,20,0.36)" };
 const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 /** dying frames per second; shot frame and recoil frame lengths (s); aim kept after a target drops (s) */
 const DIE_FPS = 10, SHOT_S = 0.06, RECOIL_S = 0.08, AIM_HOLD_S = 0.8;
+/** weapons firing faster than this (s between rounds) hold the shot frame through a burst: carbine,
+ * SMG, special-forces rifle, machine gun, flamethrower. Slower ones kick back on every round. */
+const AUTO_S = 0.25;
 export type SoldierState = "idle" | "walk" | "fire";
 /** animation state of one figure: displayed view, cycle phase, measured movement, last shot / hit */
 interface Anim { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number }
@@ -50,7 +53,7 @@ const LOOP_M: Record<string, number> = { walk_SW: 1.6, walk_SW2: 1.3, walk_E: 1.
 /** turned soldier: the walk clip ramps from standing to a long stride; slow and fast step cycles */
 const ZS_SLOW = [0, 1, 2, 3, 2, 1], ZS_FAST = [1, 2, 3, 4, 3, 2], ZS_LOOP_M = 1.4;
 const FALL_S = 0.45;   // infected fall: standing pose tips over and gives way to the lying frame
-export interface SoldierPose { state: SoldierState; anim: string; i: number; bob: number; dir: Dir8; flash: boolean }
+export interface SoldierPose { state: SoldierState; anim: string; i: number; bob: number; dir: Dir8; flash: boolean; sy: number }
 
 export class Sprites {
   mil: Sheet | null = null; zs: Sheet | null = null; zombies: Sheet | null = null; fx: Sheet | null = null;
@@ -166,22 +169,28 @@ export class Sprites {
     this.turnTo(st, cam, firing ? st.aimA : state === "walk" ? going : u.heading, now, firing || moving ? 0.12 : 0.25);
     const d = COMPASS[st.dir];
     if (state === "fire") {
-      const i = sinceShot < SHOT_S ? 1 : sinceShot < SHOT_S + RECOIL_S ? 2 : 0;   // shot, recoil, aim
-      return { state, anim: "fire_" + d, i, bob: 0, dir: d, flash: i === 1 && u.wid !== "flamer" };
+      // shot, recoil, aim. Automatic weapons would cycle these several times a second (shaking): during
+      // a burst the rifle stays shouldered on the shot frame (the flash still marks every round) and
+      // the recoil frame comes once, when the burst ends.
+      const iv = u.weapon ? u.weapon.interval : 1;
+      const auto = iv < AUTO_S;
+      const i = sinceShot < SHOT_S || (auto && sinceShot < iv * 1.6) ? 1 : sinceShot < (auto ? iv * 1.6 : SHOT_S) + RECOIL_S ? 2 : 0;
+      return { state, anim: "fire_" + d, i, bob: 0, dir: d, flash: sinceShot < SHOT_S && u.wid !== "flamer", sy: 1 };
     }
     if (state === "walk") {
       // stride lengthens with speed (2 steps = 1.4 m + 0.25 m per m/s; 2.3 m at 3.6 m/s): no foot sliding
       const cycle = 1.4 + 0.25 * Math.max(0, st.spd);
       st.phase += moved / cycle;
       const n = this.mil!.atlas.anims["walk_" + d].length;
-      return { state, anim: "walk_" + d, i: Math.floor(st.phase * n) % n, bob: 0, dir: d, flash: false };
+      return { state, anim: "walk_" + d, i: Math.floor(st.phase * n) % n, bob: 0, dir: d, flash: false, sy: 1 };
     }
     // idle: at the ready in line/box/circle/defensive positions and when holding; otherwise at ease, breathing
     const sq = u.order.kind === "formation" ? squadOf(g, u) : null;
     const ready = u.reloadT <= 0 && (u.order.kind === "hold" || u.order.kind === "defend" || (!!sq && sq.halted && KNEEL.has(sq.formation)));
-    if (ready) return { state, anim: "fire_" + d, i: 0, bob: 0, dir: d, flash: false };
+    if (ready) return { state, anim: "fire_" + d, i: 0, bob: 0, dir: d, flash: false, sy: 1 };
+    // breathing: the figure stretches a little from the feet (they stay on the ground)
     const ph = (u.id % 7) * 0.9;
-    return { state, anim: "idle_" + d, i: 0, bob: Math.sin((now + ph) * 2.1) * human * 0.005, dir: d, flash: false };
+    return { state, anim: "idle_" + d, i: 0, bob: 0, dir: d, flash: false, sy: 1 + Math.sin((now + ph) * 2.1) * 0.006 };
   }
   /** a military survivor (drawn as a soldier): the soldier's walk cycle while moving, standing otherwise */
   civPose(c: Civilian, cam: IsoCamera, now: number): { anim: string; i: number } {
@@ -432,7 +441,7 @@ export class Sprites {
       list.push({ y: s![1], d: () => {
         ctx.globalAlpha = occ ? 0.45 : 1;
         if (u.hitT > 0) ctx.filter = "brightness(1.8)";
-        this.blit(ctx, M.img, M, f, s![0], s![1] - p.bob, human, false);
+        this.blit(ctx, M.img, M, f, s![0], s![1], human, false, 1, p.sy);
         ctx.filter = "none";
       } });
       if (p.flash && f.mx !== undefined && f.my !== undefined) {
