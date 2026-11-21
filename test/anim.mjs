@@ -1,8 +1,8 @@
-// Soldier animation test (military8 sheet): runs the real sprite drawing code (Sprites.draw on a
+// Soldier animation test (soldier16 sheet): runs the real sprite drawing code (Sprites.draw on a
 // canvas at 30 fps, game time) while the game plays deterministically, and checks:
-//   atlas      every direction has walk (4), idle, fire (aim/shot/recoil, each with a barrel tip) and
-//              dying (6) clips; the barrel tip lies on the rifle and points the way of the view
-//              (dedicated N and S firing stances included)
+//   atlas      every one of the 16 views has walk (12), idle (8), fire (aim/shot/recoil, each with a
+//              barrel tip and direction) and dying (12) clips; the barrel tip lies on the rifle and the
+//              barrel points the way of the view (N and S stances included)
 //   march      a squad walks a square and turns about: views change one step at a time, no
 //              flicker, one view while walking straight, walk cycle tied to distance (no sliding)
 //   fight      while engaging (moving or not) never the walk clip; every shot starts the shot frame
@@ -40,6 +40,7 @@ const r = await page.evaluate(async () => {
   g.compact();
   const atlas = sp.mil.atlas;
   const D8 = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  const VIEWS = atlas.views || D8, NV = VIEWS.length;
   const out = { atlas: {}, march: {}, fight: {}, ways: { fire: {}, walk: {} }, dying: {} };
 
   // ---------------- atlas
@@ -48,8 +49,8 @@ const r = await page.evaluate(async () => {
   const px = cx.getImageData(0, 0, cv.width, cv.height).data;
   const alphaNear = (x, y) => { let m = 0; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) m = Math.max(m, px[((y + dy) * cv.width + (x + dx)) * 4 + 3]); return m; };
   const clipBad = [], tipBad = [];
-  for (const d of D8) {
-    const want = { walk: 4, idle: 1, fire: 3, die: 6 };
+  for (const [vi, d] of VIEWS.entries()) {
+    const want = { walk: 12, idle: 8, fire: 3, die: 12 };
     for (const k in want) {
       const ids = atlas.anims[k + "_" + d];
       if (!ids || ids.length !== want[k]) clipBad.push(k + "_" + d);
@@ -60,14 +61,19 @@ const r = await page.evaluate(async () => {
       if (f.mx === undefined) { tipBad.push(d + " no tip"); continue; }
       const ref = atlas.ref / (f.k || 1);
       const vx = (f.mx - f.ax) / ref, vy = (f.my - f.ay) / ref;          // from the feet, in figure heights (y down)
-      const on = alphaNear(f.x + f.mx, f.y + f.my) > 100;
-      const ok = { N: vy < -0.95 && Math.abs(vx) < 0.2, S: Math.abs(vx) < 0.15 && vy < -0.45 && vy > -0.8, E: vx > 0.25, W: vx < -0.25,
-        NE: vx > 0.05 && vy < -0.95, NW: vx < -0.05 && vy < -0.95, SE: vx > 0.25 && vy > -1.0, SW: vx < -0.15 && vy > -0.8 }[d];   // (SE art is drawn facing east)
-      if (!ok || !on) tipBad.push(`${d} tip (${vx.toFixed(2)}, ${vy.toFixed(2)}) on rifle ${on}`);
+      const on = alphaNear(Math.round(f.x + f.mx), Math.round(f.y + f.my)) > 100;
+      // the view's direction on screen (x right, y down) and the barrel's, from the frame
+      const c = (vi * 2 * Math.PI) / NV, ex = Math.sin(c), ey = -Math.cos(c);
+      const md = f.md || [0, 0, 0];
+      const along = md[2] < 0.45 || md[0] * ex + md[1] * ey > 0.6;           // end-on (N, S) or pointing the view's way
+      const side = Math.abs(ex) < 0.3 || vx * ex > 0.03;                       // tip on the view's side of the figure
+      const height = vy < -0.35 && vy > -1.35;                                 // shoulder height (raised for N)
+      const ends = d === "N" ? vy < -0.95 : d === "S" ? Math.abs(vx) < 0.15 && vy < -0.4 && vy > -0.8 : true;
+      if (!(along && side && height && ends) || !on) tipBad.push(`${d} tip (${vx.toFixed(2)}, ${vy.toFixed(2)}) barrel (${md.map((v) => v.toFixed(2)).join(", ")}) on rifle ${on}`);
     }
   }
   // one standing height for every direction (the sheet draws some directions taller)
-  const heights = D8.map((d) => {
+  const heights = VIEWS.map((d) => {
     const f = atlas.frames[atlas.anims["idle_" + d][0]];
     let top = f.h;
     for (let y = 0; y < f.h && top === f.h; y++) for (let x = 0; x < f.w; x++) if (px[((f.y + y) * cv.width + f.x + x) * 4 + 3] > 128) { top = y; break; }
@@ -146,7 +152,7 @@ const r = await page.evaluate(async () => {
       const a = seq[k - 1], b = seq[k];
       if (a.dir !== b.dir) {
         changes++;
-        if (Math.min((a.dir - b.dir + 8) % 8, (b.dir - a.dir + 8) % 8) > 1) jumps++;
+        if (Math.min((a.dir - b.dir + NV) % NV, (b.dir - a.dir + NV) % NV) > 1) jumps++;
         if (lastChange && lastChange.from === b.dir && b.t - lastChange.t < 0.25) { flicker++; flickers.push({ id, t: +b.t.toFixed(2), anim: b.anim }); }
         if (lastChange && lastChange.from === b.dir && b.t - lastChange.t < 1) { wobble++; if (b.state === "walk") wobbleWalk++; }
         lastChange = { from: a.dir, t: b.t };
@@ -176,7 +182,7 @@ const r = await page.evaluate(async () => {
     }
   }
   const flashesDrawn = sp.flashes.filter((f) => f.t >= marchFrom && f.t <= fightTo).length;
-  out.march = { walkStarts, walkStartsOnStep, changes, jumps, flicker, wobble, wobbleWalk, flickers: flickers.slice(0, 5), straightChanges, straightBad, straightTime, framesPerMetre: metres ? frameSteps / metres : 0, expectedPerMetre: metres ? expected / metres : 0, metresPerCycle: frameSteps ? metres / (frameSteps / 4) : 0 };
+  out.march = { walkStarts, walkStartsOnStep, changes, jumps, flicker, wobble, wobbleWalk, flickers: flickers.slice(0, 5), straightChanges, straightBad, straightTime, framesPerMetre: metres ? frameSteps / metres : 0, expectedPerMetre: metres ? expected / metres : 0, metresPerCycle: frameSteps ? metres / (frameSteps / atlas.anims["walk_N"].length) : 0 };
   out.fight = { wwe: wwe.slice(0, 6), shots, shotsShown, flashNoShot, flashLong, walkWhileEngaging, engagedMovingFrames, fireFrames, flashesDrawn, kills: g.stats.killed };
 
   // ---------------- one soldier, eight directions: firing, then walking
@@ -261,7 +267,7 @@ const r = await page.evaluate(async () => {
   S0.x = home[0] + 14; S0.y = home[1];
   step(0.5);
   const corpses = [];
-  extra.forEach((u, k) => { const st = sp.anim.get(u.id); st.dir = k; st.prevDir = -1; st.dirT = g.time; });
+  extra.forEach((u, k) => { const st = sp.anim.get(u.id); st.dir = (k * NV) / 8; st.prevDir = -1; st.dirT = g.time; });
   const dieFrom = g.time;
   for (const u of extra) { g.damage(u, 1e5, null, "bullet"); const c = g.corpses.find((c) => c.uid === u.id); if (c) corpses.push([u, c]); }
   const track = corpses.map(() => []);
@@ -272,8 +278,8 @@ const r = await page.evaluate(async () => {
   out.dying = corpses.map(([u, c], k) => {
     const tr = track[k], want = "die_" + D8[k];
     const mono = tr.every((q, j) => j === 0 || q.i >= tr[j - 1].i);
-    const lastAt = tr.find((q) => q.i === 5);
-    return { want, anims: [...new Set(tr.map((q) => q.anim))], first: tr[0].i, mono, lastAt: lastAt ? +lastAt.t.toFixed(2) : null, held: tr.filter((q) => q.t > 0.8).every((q) => q.i === 5), stateKept: sp.anim.has(u.id) };
+    const last = atlas.anims[want].length - 1, lastAt = tr.find((q) => q.i === last);
+    return { want, anims: [...new Set(tr.map((q) => q.anim))], first: tr[0].i, mono, lastAt: lastAt ? +lastAt.t.toFixed(2) : null, held: tr.filter((q) => q.t > 1.25).every((q) => q.i === last), stateKept: sp.anim.has(u.id) };
   });
   out.deadPoses = deadPoses; out.missing = missing;
   return out;
@@ -283,8 +289,8 @@ const ok = (c) => (c ? "PASS" : "FAIL");
 const F = r.fight, M = r.march;
 const fireWays = Object.entries(r.ways.fire), walkWays = Object.entries(r.ways.walk);
 const checks = [
-  [r.atlas.clipBad.length === 0, `every direction has walk 4 / idle 1 / fire 3 / dying 6 frames: ${r.atlas.clipBad.join(", ") || "all 8"}`],
-  [r.atlas.tipBad.length === 0, `barrel tip on the rifle and pointing the view's way in all 24 firing frames (N and S stances included): ${r.atlas.tipBad.join("; ") || "ok"}`],
+  [r.atlas.clipBad.length === 0, `every view has walk 12 / idle 8 / fire 3 / dying 12 frames: ${r.atlas.clipBad.join(", ") || "all 16"}`],
+  [r.atlas.tipBad.length === 0, `barrel tip on the rifle and pointing the view's way in all 48 firing frames (N and S stances included): ${r.atlas.tipBad.join("; ") || "ok"}`],
   [Math.max(...r.atlas.heights) - Math.min(...r.atlas.heights) < 0.03, `one standing height in every direction: ${r.atlas.heights.map((h) => h.toFixed(3)).join(" ")} figure heights`],
   [M.walkStarts > 10 && M.walkStartsOnStep === M.walkStarts, `walks start with a step: ${M.walkStartsOnStep}/${M.walkStarts}`],
   [M.jumps === 0, `march: view changes go to the next view: ${M.changes} changes, ${M.jumps} skipped (${M.wobble} turned back within 1 s, ${M.wobbleWalk} of them walking)`],
@@ -297,7 +303,7 @@ const checks = [
   [fireWays.length === 8 && fireWays.every(([d, w]) => w.clips.length === 1 && w.clips[0] === "fire_" + d && w.shots > 0 && w.flashes > 0 && w.flashDirs.length === 1 && w.flashDirs[0] === d), `firing toward a target in all 8 directions: ${fireWays.map(([d, w]) => `${d}:${w.clips.join("/")}·${w.shots} shots·${w.flashes} flashes@${w.tip}`).join("  ")}`],
   [r.ways.fire.N && r.ways.fire.N.tip && r.ways.fire.N.tip[1] < -0.9 && r.ways.fire.S && r.ways.fire.S.tip && r.ways.fire.S.tip[1] > -0.8, `north firing stance flashes above the head, south stance at the chest: N ${r.ways.fire.N && r.ways.fire.N.tip}, S ${r.ways.fire.S && r.ways.fire.S.tip}`],
   [walkWays.length === 8 && walkWays.every(([d, w]) => w.frames > 30 && w.share >= 0.8), `walking in all 8 directions uses that direction's cycle: ${walkWays.map(([d, w]) => `${d}:${Math.round(w.share * 100)}%`).join(" ")}`],
-  [r.dying.length === 8 && r.dying.every((q) => q.anims.length === 1 && q.anims[0] === q.want && q.first === 0 && q.mono && q.lastAt !== null && q.lastAt <= 0.7 && q.held), `dying in 8 views plays once and holds the last frame: ${r.dying.map((q) => `${q.anims[0]}@${q.lastAt}s`).join(" ")}`],
+  [r.dying.length === 8 && r.dying.every((q) => q.anims.length === 1 && q.anims[0] === q.want && q.first === 0 && q.mono && q.lastAt !== null && q.lastAt <= 1.2 && q.held), `dying in 8 views plays once and holds the last frame: ${r.dying.map((q) => `${q.anims[0]}@${q.lastAt}s`).join(" ")}`],
   // automatic weapons hold the rifle steady through a burst; single shots kick once each (shot, recoil, aim)
   ...Object.entries(r.classes).map(([cls, c]) => { const auto = ["carbine", "smg", "sf_rifle", "lmg", "flamer"].includes(c.wid), perShot = c.shots ? c.changesPerS * 3 / c.shots : 0;
     return [c.shots > 0 && c.fireClips >= 1 && (c.wid === "flamer" ? c.flashes === 0 : c.flashes >= c.shots) && (auto ? c.changesPerS <= 1 : perShot <= 3.2),

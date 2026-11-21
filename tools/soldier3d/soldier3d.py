@@ -434,7 +434,7 @@ def render(J, yaw_deg, fx=None):
     hidx = np.nonzero(hit)[0]
     rgba = np.zeros((N * N, 4))
     depth = np.full(N * N, np.inf)
-    # --- soft cast shadow on the ground plane (y = 0)
+    # --- soft cast shadow on the ground plane (y = 0); off when SHADOW_A is 0 (game atlas)
     sl = SHADOW_L @ Ryaw
     corners = np.array([[x, y, z] for x in (scene.lo[0], scene.hi[0])
                         for y in (0.0, scene.hi[1]) for z in (scene.lo[2], scene.hi[2])])
@@ -445,7 +445,7 @@ def render(J, yaw_deg, fx=None):
     gsel = (Gp[:, 0] > glo[0]) & (Gp[:, 0] < ghi[0]) & (Gp[:, 2] > glo[2]) & (Gp[:, 2] < ghi[2])
     hitmask = np.zeros(N * N, bool)
     hitmask[cand[hidx]] = True
-    gidx = np.nonzero(gsel & ~hitmask)[0]
+    gidx = np.nonzero(gsel & ~hitmask)[0] if SHADOW_A > 0 else np.zeros(0, int)
     if len(gidx):
         G0 = Gp[gidx] + np.array([0, 0.004, 0])
         res = np.ones(len(gidx))

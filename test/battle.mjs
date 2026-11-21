@@ -49,7 +49,7 @@ const r = await page.evaluate(() => {
       const st = sp.anim.get(e.id);
       if (!log.has(e.id)) log.set(e.id, { kind: name, seq: [] });
       const seq = log.get(e.id).seq;
-      if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, view: st ? st.dir : -1, anim: p.anim, x: e.x, y: e.y, moving: e.moving });
+      if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, view: st ? st.dir : -1, nv: st ? st.nv : 8, anim: p.anim, x: e.x, y: e.y, moving: e.moving });
       return p;
     };
   }
@@ -136,7 +136,7 @@ const r = await page.evaluate(() => {
     }
   }
   const soldierDeaths = [...deathTrack.values()];
-  const deathsOk = soldierDeaths.filter((tr) => tr.every((q, j) => j === 0 || (q.i >= tr[j - 1].i && q.anim === tr[0].anim)) && tr.filter((q) => q.age > 0.7).every((q) => q.i === 5)).length;
+  const deathsOk = soldierDeaths.filter((tr) => tr.every((q, j) => j === 0 || (q.i >= tr[j - 1].i && q.anim === tr[0].anim)) && tr.filter((q) => q.age > 0.1 * sp.mil.atlas.anims[tr[0].anim].length + 0.05).every((q) => q.i === sp.mil.atlas.anims[tr[0].anim].length - 1)).length;   // the last frame from (frames / 10 fps) on
   const infectedBodies = bodies.filter((c) => !(c.kind === "soldier" || c.sprite)).length;
 
   // ---- metrics
@@ -150,7 +150,8 @@ const r = await page.evaluate(() => {
       for (let k = 1; k < w.length; k++) {
         const a = w[k - 1], q = w[k]; m.frames++;
         if (q.view !== a.view) {
-          if (Math.min((q.view - a.view + 8) % 8, (a.view - q.view + 8) % 8) > 1) m.jumps++;
+          const nv = q.nv || 8;
+          if (Math.min((q.view - a.view + nv) % nv, (a.view - q.view + nv) % nv) > 1) m.jumps++;
           if (lastChange && lastChange.from === q.view && q.t - lastChange.t < 0.25) m.flicker++;
           lastChange = { from: a.view, t: q.t };
         }

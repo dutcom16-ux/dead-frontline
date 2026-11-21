@@ -39,6 +39,7 @@ const r = await page.evaluate(() => {
   g.compact();
   const ZA = sp.zombies.atlas, SA = sp.zs.atlas, MA = sp.mil.atlas;
   const COMPASS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
+  const MV = MA.views || COMPASS;   // the soldier sheet's views (16)
   const canvas = document.createElement("canvas"); canvas.width = 1280; canvas.height = 720;
   const ctx = canvas.getContext("2d");
   const ui = { hover: null, box: null, ghost: null, showPaths: false };
@@ -55,14 +56,14 @@ const r = await page.evaluate(() => {
       const st = sp.anim.get(e.id);
       if (!log.has(e.id)) { log.set(e.id, []); meta.set(e.id, { kind, type: e.type || (e.military ? "military" : "civilian") }); }
       const seq = log.get(e.id);
-      if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, anim: p.anim, i: ids ? ids[((Math.floor(p.i) % ids.length) + ids.length) % ids.length] : -1, flip: !!p.flip, view: st ? st.dir : -1, x: e.x, y: e.y, atk: e.attackT, sy: p.sy || 1, state: e.state });
+      if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, anim: p.anim, i: ids ? ids[((Math.floor(p.i) % ids.length) + ids.length) % ids.length] : -1, flip: !!p.flip, view: st ? st.dir : -1, nv: st ? st.nv : 8, x: e.x, y: e.y, atk: e.attackT, sy: p.sy || 1, state: e.state });
       return p;
     };
   };
   wrap("zpose", ZA, "infected"); wrap("zpose8", SA, "turned");
   { const orig = sp.civPose.bind(sp); sp.civPose = (c, cm, now) => { const p = orig(c, cm, now); const ids = MA.anims[p.anim]; if (!ids) missing++;
     if (!log.has(c.id)) { log.set(c.id, []); meta.set(c.id, { kind: "survivor", type: "military" }); }
-    const seq = log.get(c.id), st = sp.anim.get(c.id); if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, anim: p.anim, i: ids ? ids[p.i % ids.length] : -1, flip: false, view: st.dir, x: c.x, y: c.y }); return p; }; }
+    const seq = log.get(c.id), st = sp.anim.get(c.id); if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, anim: p.anim, i: ids ? ids[p.i % ids.length] : -1, flip: false, view: st.dir, nv: st.nv, x: c.x, y: c.y }); return p; }; }
   let n = 0, focus = null, drawMs = 0, draws = 0;
   const pins = [];
   const step = (sec, after) => {
@@ -220,8 +221,8 @@ const r = await page.evaluate(() => {
   // ---------------- metrics
   const per = {};
   const bucket = (id) => { const m = meta.get(id); const key = m.kind === "infected" ? m.type : m.kind === "turned" ? "turned" : m.type === "military" ? "survivor (soldier sprite)" : "survivor"; return (per[key] ||= { n: 0, frames: 0, jumps: 0, flicker: 0, walkFrames: 0, offView: 0, wrongClip: 0, framesStill: 0, frameChangesStill: 0, idleFaces: 0, metres: 0, cycleSteps: 0, hits: 0, hitsShown: 0, missed: [], walkT: 0, standSide: 0, standSideWide: 0 }); };
-  const viewClip = (anim, flip, v) => {
-    const d = COMPASS[v];
+  const viewClip = (anim, flip, v, nv = 8) => {
+    const d = (nv === MV.length && nv !== 8 ? MV : COMPASS)[v];
     if (/^(attack|lunge|claw|crawl_attack)_E$/.test(anim)) return true;                       // attack: side view toward the victim
     if (/^crawl_E$/.test(anim) || anim === "dead") return true;
     if (/^back_N$/.test(anim)) return d === "N" || d === "NE" || d === "NW";
@@ -246,11 +247,12 @@ const r = await page.evaluate(() => {
     for (let k = 1; k < seq.length; k++) {
       const a = seq[k - 1], q = seq[k]; b.frames++;
       if (q.view !== a.view) {
-        if (Math.min((q.view - a.view + 8) % 8, (a.view - q.view + 8) % 8) > 1) b.jumps++;
+        const nv = q.nv || 8;
+        if (Math.min((q.view - a.view + nv) % nv, (a.view - q.view + nv) % nv) > 1) b.jumps++;
         if (lastChange && lastChange.from === q.view && q.t - lastChange.t < 0.25) b.flicker++;
         lastChange = { from: a.view, t: q.t };
       }
-      if (!viewClip(q.anim, q.flip, q.view)) b.wrongClip++;
+      if (!viewClip(q.anim, q.flip, q.view, q.nv || 8)) b.wrongClip++;
       const d = Math.hypot(q.x - a.x, q.y - a.y), dt = q.t - a.t;
       const walking = /^(walk|run|hunch|charge|crawl|z_walk)/.test(q.anim) && d / dt > 0.6;
       if (walking && k > 20) {
@@ -258,7 +260,7 @@ const r = await page.evaluate(() => {
         // the view follows the real direction (smoothed over the last 0.5 s, allowing the settle delay)
         const p = seq[Math.max(0, k - 15)];
         const dd = Math.hypot(q.x - p.x, q.y - p.y);
-        if (dd > 0.6) { const c = compassOf(q.x - p.x, q.y - p.y); const off = Math.abs(((c - q.view * 45 + 540) % 360) - 180); if (off > 67.5) b.offView++; }
+        if (dd > 0.6) { const c = compassOf(q.x - p.x, q.y - p.y); const stp = 360 / (q.nv || 8), off = Math.abs(((c - q.view * stp + 540) % 360) - 180); if (off > stp * 1.5) b.offView++; }
         b.metres += d; b.walkT += dt; if (q.i !== a.i) b.cycleSteps++;
       }
       // standing still (not attacking): the frame must not change (no walking on the spot, no face swaps)
@@ -267,9 +269,12 @@ const r = await page.evaluate(() => {
         // (after the 0.5 s it takes to come to a stop; turning on the spot changes the view: allowed)
         // standing side-on: the narrowest-stance frame (feet together), not a mid-stride one
         if (still > 15 && meta.get(id).kind === "infected" && /^(walk_E|hunch_E|stand_E2?)$/.test(q.anim)) { b.standSide++; if (!/^stand_E/.test(q.anim)) b.standSideWide++; }
-        if (still > 15 && q.view === a.view) { b.framesStill++; if (q.i !== a.i || q.flip !== a.flip) { b.frameChangesStill++; if (b.missed.length < 6) b.missed.push(`still ${a.anim}:${a.i}${a.flip ? 'f' : ''}>${q.anim}:${q.i}${q.flip ? 'f' : ''} ${q.state}`); } }
+        // (a soldier-sheet idle clip of several frames is breathing on the spot, not stepping)
+        const breathing = q.anim === a.anim && /^idle_/.test(q.anim) && !!MA.anims[q.anim] && MA.anims[q.anim].length > 1;
+        if (still > 15 && q.view === a.view) { b.framesStill++; if ((q.i !== a.i || q.flip !== a.flip) && !breathing) { b.frameChangesStill++; if (b.missed.length < 6) b.missed.push(`still ${a.anim}:${a.i}${a.flip ? 'f' : ''}>${q.anim}:${q.i}${q.flip ? 'f' : ''} ${q.state}`); } }
       } else still = 0;
-      if (/^idle_S/.test(q.anim) && /^idle_S/.test(a.anim) && q.i !== a.i && d < 1e-4) b.idleFaces++;
+      // (the infected sheet's front idle rows change face every frame; the soldier's idle clip breathes)
+      if (meta.get(id).kind === "infected" && /^idle_S/.test(q.anim) && /^idle_S/.test(a.anim) && q.i !== a.i && d < 1e-4) b.idleFaces++;
       // hits: the attack timer restarts on a hit; that frame shows the full reach
       if (q.atk !== undefined && q.atk > a.atk + 0.05 && q.t >= Math.min(atkFrom, tAtkFrom)) {
         b.hits++;

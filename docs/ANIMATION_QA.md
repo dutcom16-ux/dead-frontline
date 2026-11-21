@@ -17,11 +17,11 @@ step finishes, so the work can be resumed without repeating anything.
 
 | # | Unit | Drawn by | Asset | Animation code | Animations available |
 |---|---|---|---|---|---|
-| 1–10 | Soldiers: rifleman, assault, sniper, machine gunner, shotgunner, flamethrower, rocket, medic, engineer, special forces | sprite | `military8` (Military_Soldier_Sprite_Sheet.png) | `Sprites.soldierPose`, `dyingPose`, `muzzleFlash` | walk 8 dirs (3 frames), idle, fire (aim, shot, recoil), dying (6 frames) |
+| 1–10 | Soldiers: rifleman, assault, sniper, machine gunner, shotgunner, flamethrower, rocket, medic, engineer, special forces | sprite | `soldier16` (rendered by `tools/soldier3d/`; was `military8` from Military_Soldier_Sprite_Sheet.png) | `Sprites.soldierPose`, `dyingPose`, `muzzleFlash`, `muzzleOf` | 16 views: walk (12 frames), idle (8), fire (aim, shot, recoil), dying (12) |
 | 11–17 | Infected: walker, runner, crawler, brute, bloater, screamer, mutant | sprite | `zombies` (8086.png) | `Sprites.zpose`, fall in `draw` | front idle, back, three-quarter left walk ×2, side walk ×2, side run ×3, charge, crawl, attacks ×3, crawl grab, dead ×2 |
 | 18 | Abomination (boss) | 3D | `abominationGeo` | `SceneRender` | none (rigid model, step bob) |
 | 19 | Turned soldier | sprite | `infected_soldier8` (8089.png) | `Sprites.zpose8` | walk 8 dirs (one stride), reach + grab, dying (3 frames) |
-| 20 | Military survivor | sprite | `military8` | `Sprites.civPose` | soldier walk and idle |
+| 20 | Military survivor | sprite | `soldier16` | `Sprites.civPose` | soldier walk and idle |
 | 21 | Civilian survivor | 3D | `civilianGeo` (feet together, left, right) | `SceneRender` stride | step poses |
 | 22–27 | Vehicles: jeep, APC, IFV, tank, truck, ARV | 3D | `Models.ts` | `SceneRender` | none (rigid) |
 | 28–30 | Transports: helicopter, supply truck, boat | 3D | `Models.ts` | `SceneRender` | none (rigid) |
@@ -45,6 +45,10 @@ with a step.
 | S7 | Dying frames 1–3 (the sheet's top dying row, checked against the source) are standing poses, so a shot soldier stays upright for 0.3 s before he collapses. | art |
 | S8 | The lying frames are the same pose (head to the left) in every direction. | art |
 | S9 | The sheet's south-east groups are drawn facing east (backpack visible): there is no south-east art. | art |
+
+Update: the `military8` sheet has since been replaced by `soldier16`, rendered from one 3D rig in 16
+views (`docs/ASSETS.md`). That art removes S2, S8 and S9 (real south-east views, lying poses that follow
+the view), and S7 (the fall starts on the third frame of twelve). S4–S6 remain.
 
 ### Infected (units 11–17: one sheet, one controller; types differ in tint, size and speed)
 

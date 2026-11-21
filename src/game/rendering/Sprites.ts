@@ -1,20 +1,23 @@
-// Figures drawn from the supplied sprite sheets (public/sprites/*, cut by tools/slice_sprites.py):
-//   military8          every infantry soldier: walk, idle, fire, die in 8 directions
+// Figures drawn from the sprite sheets in public/sprites/:
+//   soldier16          every infantry soldier: walk, idle, fire, die in 16 views (rendered from the 3D
+//                      soldier rig, tools/soldier3d/game_atlas.py)
+// and, cut by tools/slice_sprites.py from the supplied sheets:
 //   infected_soldier8  soldiers who turned into infected (8 directions)
 //   zombies            the infected
 //   effects            explosion, smoke, blood, sparks
 //
 // Soldier animation (soldierPose):
 //   * one state per soldier, by priority: dying (drawn from his corpse) > firing > walking > idle;
-//   * eight screen directions, never mirrored at draw time (SE is SW mirrored once in the atlas, because
-//     the sheet's SE row is drawn facing east). A soldier turns one view at a time through the views in
+//   * sixteen screen views (the atlas's own list), never mirrored. A soldier turns one view at a time through the views in
 //     between, holds a view until the heading is clearly past it, never undoes a turn straight away, and
 //     keeps aiming at a fallen target's spot for a moment instead of snapping back;
-//   * the walk cycle (stride, passing step, stride, passing step) advances with the distance covered,
+//   * the walk cycle (12 frames, two steps) advances with the distance covered,
 //     with a longer stride at higher speed, so the feet do not slide;
 //   * firing: aim between shots; each shot (the weapon's real firing event, Unit.shotN) shows the shot
-//     frame with a muzzle flash at the barrel tip, then the recoil frame, then aim again;
-//   * dying: the six-frame fall plays once from the moment of death and the last frame stays.
+//     frame with a muzzle flash at the barrel tip, then the recoil frame, then aim again. Tracers start
+//     at the barrel tip of the figure as drawn (muzzleOf);
+//   * idle: the breathing clip loops;
+//   * dying: the fall plays once from the moment of death and the last frame stays.
 // Sprites are drawn on the 2D overlay sorted by screen depth; a figure behind a building is drawn faded.
 // If a sheet fails to load, the game draws its 3D figures for what that sheet covered.
 import type { Game } from "../Game";
@@ -24,8 +27,12 @@ import { Unit, Zombie, Civilian, Corpse } from "../entities";
 import { squadOf, OMNI } from "../units/Squads";
 import { canFireWhileMoving } from "../units/UnitAI";
 
-interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; k?: number; mx?: number; my?: number }
-interface Atlas { size: [number, number]; ref: number; frames: Frame[]; anims: Record<string, number[]> }
+interface Frame { x: number; y: number; w: number; h: number; ax: number; ay: number; k?: number; mx?: number; my?: number;
+  /** firing frames: the barrel's direction on screen (y down) and how much of it shows (1 side on, 0 end on) */
+  md?: [number, number, number] }
+interface Atlas { size: [number, number]; ref: number; frames: Frame[]; anims: Record<string, number[]>;
+  /** view names clockwise from facing away from the viewer (sheets without it have the 8 of COMPASS) */
+  views?: string[] }
 interface Sheet { img: HTMLImageElement; atlas: Atlas; tints: Map<string, HTMLCanvasElement> }
 export type Dir8 = "N" | "NE" | "E" | "SE" | "S" | "SW" | "W" | "NW";
 const SECT8: Dir8[] = ["E", "NE", "N", "NW", "W", "SW", "S", "SE"];
@@ -40,12 +47,14 @@ const TINTS: Record<string, string> = { bloater: "rgba(150,175,40,0.42)", brute:
 const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 /** dying frames per second; shot frame and recoil frame lengths (s); aim kept after a target drops (s) */
 const DIE_FPS = 10, SHOT_S = 0.06, RECOIL_S = 0.08, AIM_HOLD_S = 0.8;
+/** breathing clip frames per second (soldier sheets with an idle clip of several frames) */
+const IDLE_FPS = 6;
 /** weapons firing faster than this (s between rounds) hold the shot frame through a burst: carbine,
  * SMG, special-forces rifle, machine gun, flamethrower. Slower ones kick back on every round. */
 const AUTO_S = 0.25;
 export type SoldierState = "idle" | "walk" | "fire";
 /** animation state of one figure: displayed view, cycle phase, measured movement, last shot / hit */
-interface Anim { dir: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number; run: boolean; inst: number }
+interface Anim { dir: number; nv: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number; run: boolean; inst: number }
 /** the last pose an infected was drawn in (its fall starts from it) */
 interface LastPose { anim: string; i: number; flip: boolean; size: number; wide: number; tint: string; sheet: "Z" | "ZS"; view: Dir8 }
 /** metres covered by one loop of each infected clip (the loop advances with distance: no sliding) */
@@ -57,20 +66,23 @@ const strideK = (spd: number) => (spd > WALK_PACE ? Math.pow(spd / WALK_PACE, 0.
 /** turned soldier: the walk clip ramps from standing to a long stride; slow and fast step cycles */
 const ZS_SLOW = [0, 1, 2, 3, 2, 1], ZS_FAST = [1, 2, 3, 4, 3, 2], ZS_LOOP_M = 1.4;
 const FALL_S = 0.45;   // infected fall: standing pose tips over and gives way to the lying frame
-export interface SoldierPose { state: SoldierState; anim: string; i: number; bob: number; dir: Dir8; flash: boolean; sy: number }
+export interface SoldierPose { state: SoldierState; anim: string; i: number; bob: number; dir: string; flash: boolean; sy: number }
 
 export class Sprites {
   mil: Sheet | null = null; zs: Sheet | null = null; zombies: Sheet | null = null; fx: Sheet | null = null;
   zready = false;
   anim = new Map<number, Anim>();
   /** view each fallen soldier dies in (fixed at the moment of death) */
-  deathDir = new Map<number, Dir8>();
+  deathDir = new Map<number, string>();
   /** last pose of each infected (its fall starts from it) */
   lastPose = new Map<number, LastPose>();
   private pruneT = -99;
   occl = new Map<number, { t: number; v: boolean }>();
   /** recent muzzle flashes drawn (for tests): soldier, game time, offset from the feet in figure heights, view */
-  flashes: { id: number; t: number; x: number; y: number; dir: Dir8 }[] = [];
+  flashes: { id: number; t: number; x: number; y: number; dir: string }[] = [];
+  /** each soldier's barrel tip (shot frame of the view he is shown in), from his feet in map metres,
+   * so that tracers leave the rifle as drawn; t = game time it was measured */
+  muzzleOff = new Map<number, { t: number; dx: number; dy: number; dz: number }>();
   async load(base = "sprites/") {
     const get = async (name: string): Promise<Sheet | null> => {
       try {
@@ -81,7 +93,7 @@ export class Sprites {
         return { img, atlas, tints: new Map() };
       } catch (e) { return null; }
     };
-    [this.mil, this.zs, this.zombies, this.fx] = await Promise.all([get("military8"), get("infected_soldier8"), get("zombies"), get("effects")]);
+    [this.mil, this.zs, this.zombies, this.fx] = await Promise.all([get("soldier16"), get("infected_soldier8"), get("zombies"), get("effects")]);
     this.zready = !!this.zombies;
   }
   /** the soldier sheet is loaded (infantry and military civilians are drawn as sprites) */
@@ -95,11 +107,24 @@ export class Sprites {
     return this.zready && !!c.kind;
   }
   coversEffects() { return !!this.fx; }
+  /** where a soldier's bullets leave his rifle (map x, y, z), as last drawn; null when not drawn lately */
+  muzzleOf(g: Game, id: number): [number, number, number] | null {
+    const o = this.muzzleOff.get(id), u = o ? (g.get(id) as Unit | null) : null;
+    if (!o || !u || !u.alive || g.time - o.t > 0.5) return null;
+    return [u.x + o.dx, u.y + o.dy, u.z + o.dz];
+  }
 
   /** one of eight screen directions */
   dir8(cam: IsoCamera, heading: number): Dir8 {
     const [sx, sy] = this.facing(cam, heading);
     return SECT8[((Math.round(Math.atan2(sy, sx) / (Math.PI / 4)) % 8) + 8) % 8];
+  }
+  /** the soldier sheet's views, clockwise from N */
+  private views(): string[] { return (this.mil && this.mil.atlas.views) || COMPASS; }
+  /** nearest of `views` (evenly spaced, clockwise from N) for a map heading */
+  private viewOf(cam: IsoCamera, heading: number, views: string[]): string {
+    const n = views.length;
+    return views[Math.round(this.compassDeg(cam, heading) / (360 / n)) % n];
   }
   /** compass angle on screen: 0 = away from the viewer (N), clockwise */
   private compassDeg(cam: IsoCamera, heading: number) {
@@ -108,19 +133,21 @@ export class Sprites {
   }
   /** displayed view: hysteresis, settle time, one view at a time, no undoing a turn straight away */
   private turnTo(st: Anim, cam: IsoCamera, heading: number, now: number, settle: number) {
-    const off = (((this.compassDeg(cam, heading) - st.dir * 45 + 540) % 360) - 180);
-    if (Math.abs(off) <= 30.5) { st.wantT = -1; return; }
+    const step = 360 / st.nv;
+    const off = (((this.compassDeg(cam, heading) - st.dir * step + 540) % 360) - 180);
+    if (Math.abs(off) <= step * 0.678) { st.wantT = -1; return; }   // half a view and a margin (30.5° of 45°)
     if (st.wantT < 0) st.wantT = now;
     if (now - st.wantT < settle) return;
     if (now - st.dirT < 0.06) return;
-    const next = (st.dir + (off > 0 ? 1 : -1) + 8) % 8;
+    const next = (st.dir + (off > 0 ? 1 : -1) + st.nv) % st.nv;
     if (next === st.prevDir && now - st.dirT < 0.3) return;
     st.prevDir = st.dir; st.dir = next; st.dirT = now;
   }
-  private stateOf(u: { id: number; x: number; y: number }, cam: IsoCamera, heading: number, now: number): Anim {
+  private stateOf(u: { id: number; x: number; y: number }, cam: IsoCamera, heading: number, now: number, nv = 8): Anim {
     let st = this.anim.get(u.id);
+    if (st && st.nv !== nv) { st.dir = Math.round((st.dir * nv) / st.nv) % nv; st.prevDir = -1; st.nv = nv; }
     if (!st) {
-      st = { dir: Math.round(this.compassDeg(cam, heading) / 45) % 8, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9, run: false, inst: 0 };
+      st = { dir: Math.round(this.compassDeg(cam, heading) / (360 / nv)) % nv, nv, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9, run: false, inst: 0 };
       this.anim.set(u.id, st);
     }
     return st;
@@ -150,7 +177,8 @@ export class Sprites {
   soldierPose(g: Game, u: Unit, cam: IsoCamera, now: number, human: number): SoldierPose {
     const tgt = g.get(u.target);
     const engaging = !!tgt && !tgt.dead && u.losOk && (u.mag > 0 || u.reserve > 0);
-    const st = this.stateOf(u, cam, u.heading, now);
+    const V = this.views();
+    const st = this.stateOf(u, cam, u.heading, now, V.length);
     // ground speed and velocity (smoothed) and distance covered since the last frame
     const moved = this.track(st, u.x, u.y, now, u.moving ? u.speedNow : 0);
     // a shot: the weapon's firing event counts it. The shot frame and flash start on the first frame
@@ -172,7 +200,7 @@ export class Sprites {
     // can lag behind or stay on a target he cannot shoot on the move); otherwise the way he faces
     const going = Math.hypot(st.vx, st.vy) > 0.8 ? Math.atan2(st.vy, st.vx) : u.heading;
     this.turnTo(st, cam, firing ? st.aimA : state === "walk" ? going : u.heading, now, firing || moving ? 0.12 : 0.25);
-    const d = COMPASS[st.dir];
+    const d = V[st.dir];
     if (state === "fire") {
       // shot, recoil, aim. Automatic weapons would cycle these several times a second (shaking): during
       // a burst the rifle stays shouldered on the shot frame (the flash still marks every round) and
@@ -193,18 +221,22 @@ export class Sprites {
     const sq = u.order.kind === "formation" ? squadOf(g, u) : null;
     const ready = u.reloadT <= 0 && (u.order.kind === "hold" || u.order.kind === "defend" || (!!sq && sq.halted && KNEEL.has(sq.formation)));
     if (ready) return { state, anim: "fire_" + d, i: 0, bob: 0, dir: d, flash: false, sy: 1 };
-    // breathing: the figure stretches a little from the feet (they stay on the ground)
+    // breathing: the idle clip loops (each soldier at his own phase); a one-frame idle stretches a
+    // little from the feet instead (they stay on the ground)
     const ph = (u.id % 7) * 0.9;
+    const ni = this.mil!.atlas.anims["idle_" + d].length;
+    if (ni > 1) return { state, anim: "idle_" + d, i: Math.floor((now + ph) * IDLE_FPS) % ni, bob: 0, dir: d, flash: false, sy: 1 };
     return { state, anim: "idle_" + d, i: 0, bob: 0, dir: d, flash: false, sy: 1 + Math.sin((now + ph) * 2.1) * 0.006 };
   }
   /** a military survivor (drawn as a soldier): the soldier's walk cycle while moving, standing otherwise */
   civPose(c: Civilian, cam: IsoCamera, now: number): { anim: string; i: number } {
-    const st = this.stateOf(c, cam, c.heading, now);
+    const V = this.views();
+    const st = this.stateOf(c, cam, c.heading, now, V.length);
     const moved = this.track(st, c.x, c.y, now);
     const moving = this.going(st, now);
     this.turnTo(st, cam, moving && Math.hypot(st.vx, st.vy) > 0.3 ? Math.atan2(st.vy, st.vx) : c.heading, now, moving ? 0.12 : 0.25);
-    const d = COMPASS[st.dir];
-    if (!moving) return { anim: "idle_" + d, i: 0 };
+    const d = V[st.dir];
+    if (!moving) { const ni = this.mil!.atlas.anims["idle_" + d].length; return { anim: "idle_" + d, i: ni > 1 ? Math.floor((now + (c.id % 7) * 0.9) * IDLE_FPS) % ni : 0 }; }
     st.phase += moved / (1.4 + 0.25 * st.spd);
     const n = this.mil!.atlas.anims["walk_" + d].length;
     return { anim: "walk_" + d, i: Math.floor(st.phase * n) % n };
@@ -218,7 +250,7 @@ export class Sprites {
     for (const z of g.zombies) if (!z.dead) keep.add(z.id);
     for (const c of g.civs) if (!c.dead) keep.add(c.id);
     for (const c of g.corpses) if (c.uid !== undefined && g.time - c.t < 3) keep.add(c.uid);
-    for (const m of [this.anim, this.lastPose, this.occl] as Map<number, unknown>[]) for (const id of m.keys()) if (!keep.has(id)) m.delete(id);
+    for (const m of [this.anim, this.lastPose, this.occl, this.muzzleOff] as Map<number, unknown>[]) for (const id of m.keys()) if (!keep.has(id)) m.delete(id);
   }
   /**
    * A soldier who turned (8-direction infected soldier sheet). Faces the way he really moves (or his
@@ -443,6 +475,10 @@ export class Sprites {
     // ---- standing figures, back to front
     const list: { y: number; d: () => void }[] = [];
     const flashes: (() => void)[] = [];
+    // screen offsets back to map metres (the view is orthographic): 1 m to the camera's right and 1 m up
+    const c0 = bf.screen(cam.x, cam.y, cam.z), cR = bf.screen(cam.x + cam.right[0], cam.y + cam.right[1], cam.z), cU = bf.screen(cam.x, cam.y, cam.z + 1);
+    const e1 = c0 && cR ? [cR[0] - c0[0], cR[1] - c0[1]] : null, e2 = c0 && cU ? [cU[0] - c0[0], cU[1] - c0[1]] : null;
+    const det = e1 && e2 ? e1[0] * e2[1] - e1[1] * e2[0] : 0;
     if (M) for (const u of g.units) {
       if (!u.alive || u.vehicle || u.inVehicle !== null) continue;
       const s = bf.screen(u.x, u.y, u.z);
@@ -450,6 +486,13 @@ export class Sprites {
       const p = this.soldierPose(g, u, cam, now, human);
       const f = this.frame(M, p.anim, p.i);
       if (!f) continue;
+      // where his bullets leave the rifle: the barrel tip of the shot frame in this view
+      const fs = this.frame(M, "fire_" + p.dir, 1);
+      if (fs && fs.mx !== undefined && fs.my !== undefined && Math.abs(det) > 1e-6) {
+        const k = (human / M.atlas.ref) * (fs.k || 1), tx = (fs.mx - fs.ax) * k, ty = (fs.my - fs.ay) * k;
+        const a = (tx * e2![1] - ty * e2![0]) / det, b = (e1![0] * ty - e1![1] * tx) / det;
+        this.muzzleOff.set(u.id, { t: g.time, dx: a * cam.right[0], dy: a * cam.right[1], dz: b });
+      }
       const occ = this.occluded(bf, cam, u.id, u.x, u.y, u.z, now);
       list.push({ y: s![1], d: () => {
         ctx.globalAlpha = occ ? 0.45 : 1;
@@ -461,7 +504,7 @@ export class Sprites {
         // the barrel tip of this very frame, through the same anchor and scale as the figure
         const k = (human / M.atlas.ref) * (f.k || 1);
         const mx = s![0] + (f.mx - f.ax) * k, my = s![1] + (f.my - f.ay) * k;
-        flashes.push(() => { ctx.globalAlpha = occ ? 0.45 : 1; this.muzzleFlash(ctx, mx, my, p.dir, human, u.shotN); });
+        flashes.push(() => { ctx.globalAlpha = occ ? 0.45 : 1; this.muzzleFlash(ctx, mx, my, f, p.dir, human, u.shotN); });
         this.flashes.push({ id: u.id, t: g.time, x: ((f.mx - f.ax) * (f.k || 1)) / M.atlas.ref, y: ((f.my - f.ay) * (f.k || 1)) / M.atlas.ref, dir: p.dir });
         if (this.flashes.length > 400) this.flashes.splice(0, 200);
       }
@@ -536,18 +579,19 @@ export class Sprites {
     ctx.globalAlpha = 1; ctx.globalCompositeOperation = "source-over";
   }
   /** dying: the six-frame fall from the moment of death (game time), then the last frame for good */
-  dyingPose(g: Game, c: Corpse, cam: IsoCamera): { anim: string; i: number; dir: Dir8 } {
+  dyingPose(g: Game, c: Corpse, cam: IsoCamera): { anim: string; i: number; dir: string } {
     const d = this.dieDir(c, cam), anim = "die_" + d;
     const n = this.mil!.atlas.anims[anim].length;
     return { anim, i: Math.min(n - 1, Math.floor(Math.max(0, g.time - c.t) * DIE_FPS)), dir: d };
   }
   /** the view a fallen soldier dies in: the one he was shown in when he fell (fixed once) */
-  private dieDir(c: Corpse, cam: IsoCamera): Dir8 {
+  private dieDir(c: Corpse, cam: IsoCamera): string {
     const key = c.id ?? -1;
     let d = this.deathDir.get(key);
     if (!d) {
+      const V = this.views();
       const a = c.uid !== undefined ? this.anim.get(c.uid) : undefined;
-      d = a ? COMPASS[a.dir] : this.dir8(cam, c.rot);
+      d = a && a.nv === V.length ? V[a.dir] : this.viewOf(cam, c.rot, V);
       this.deathDir.set(key, d);
       if (c.uid !== undefined) this.anim.delete(c.uid);
       if (this.deathDir.size > 900) for (const k of [...this.deathDir.keys()].slice(0, 300)) this.deathDir.delete(k);
@@ -559,9 +603,10 @@ export class Sprites {
    * white-hot centre and a faint glow, about a sixth of the figure's height. Drawn only on the shot
    * frame of an actual shot (SHOT_S), so nothing stays lit between shots.
    */
-  private muzzleFlash(ctx: CanvasRenderingContext2D, x: number, y: number, d: Dir8, human: number, seed: number) {
-    const [vx, vy] = RIFLE[d];
-    const end = d === "S" || d === "N";                 // rifle pointing at or away from the viewer: a short star
+  private muzzleFlash(ctx: CanvasRenderingContext2D, x: number, y: number, f: Frame, d: string, human: number, seed: number) {
+    // the barrel's direction on screen: from the frame (rendered sheets) or by view (drawn sheets)
+    const [vx, vy] = f.md ? [f.md[0], f.md[1]] : RIFLE[d as Dir8] || [1, 0];
+    const end = f.md ? f.md[2] < 0.45 : d === "S" || d === "N";   // rifle pointing at or away from the viewer: a short star
     const len = human * (end ? 0.09 : 0.15), wid = human * 0.06;
     const ang = Math.atan2(vy, vx) + (((seed * 7919) % 7) - 3) * 0.05;   // a little variation per shot
     ctx.save();

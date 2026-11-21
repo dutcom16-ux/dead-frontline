@@ -75,7 +75,7 @@ export function fire(g: Game, u: Unit, t: any, moving: boolean) {
       const off = 1 + d * 0.06;
       ex += (Math.random() - 0.5) * off * 2; ey += (Math.random() - 0.5) * off * 2; ez = t.z + Math.random() * 1.5;
     }
-    if (k < 3) g.effect("tracer", muzzle[0], muzzle[1], muzzle[2], 0.07, 1, { x2: ex, y2: ey, z2: ez });
+    if (k < 3) g.effect("tracer", muzzle[0], muzzle[1], muzzle[2], 0.07, 1, { x2: ex, y2: ey, z2: ez, owner: u.vehicle ? undefined : u.id });
   }
   if (hitAny && t instanceof Zombie && Math.random() < 0.5) g.effect("hit", t.x, t.y, tz, 0.18, 0.5);
 }
