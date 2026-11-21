@@ -127,6 +127,8 @@ const r = await page.evaluate(() => {
     z.soldier = "rifleman"; z.hp = z.maxHp = 1e6; z.awake = true; z.state = "investigate"; z.goalX = C[0] + vx * 30; z.goalY = C[1] + vy * 30; turned.push(z);
   }
   step(9);
+  for (const z of turned) { z.state = "idle"; z.goalX = z.x; z.goalY = z.y; z.path = null; }   // standing
+  step(2.5, () => { for (const z of turned) z.state = "idle"; });
   for (const z of turned) { z.state = "chase"; z.target = T0.id; z.lastSeenX = C[0]; z.lastSeenY = C[1]; z.lastSeenT = g.time; }
   const tAtkFrom = g.time;
   step(10, () => { for (const z of turned) { z.target = T0.id; if (z.state !== "attack") z.state = "chase"; } });

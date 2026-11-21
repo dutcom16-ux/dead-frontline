@@ -122,8 +122,15 @@ move and turn with the game's own steering (no feet, so no sliding to fix). Not 
     so its feet stay on the ground; it stands with its feet together as soon as it stops.
   * Tested (`test/units.mjs`): 8 steps over 11.3 m, both legs, feet on the ground, feet together when
     stopped.
-- [ ] Turned soldier: retest
-- [ ] Survivors: retest
-- [ ] Vehicles and transports: confirmed unchanged
+- [x] Turned soldier: retest (no change needed)
+  * Tested (`test/units.mjs`): 8 views without flicker, facing the way he moves, step cycle following
+    distance (at most 9.3 frame changes a second), standing on one frame, grab on all 158 hits, dying
+    once in his last view in all 8 views. Art: single stride (T1).
+- [x] Survivors: retest (no change needed)
+  * Military survivors: soldier walk following distance (3.6 frame changes a second at 1.6 m/s),
+    standing on one frame, views without flicker. Civilians (3D): left/right step poses alternate
+    while walking, feet together when standing.
+- [x] Vehicles and transports: confirmed unchanged (rigid models; no feet, so no sliding; no
+  separate wheels, tracks or rotors to animate without new models)
 - [ ] Game-wide QA: mixed battle, rapid commands, selection, stops and turns, deaths in combat, performance
 - [ ] Regression: formations, playthroughs, systems, mobile
