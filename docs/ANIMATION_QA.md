@@ -3,8 +3,10 @@
 This file is the working record of the unit-by-unit animation repair. Update the checklist as each
 step finishes, so the work can be resumed without repeating anything.
 
-* **Checkpoint before any change:** git tag `anim-audit-baseline` (commit `958b29f`). To undo the
-  whole repair: `git checkout anim-audit-baseline -- src public tools test`.
+* **Checkpoint before any change:** commit `958b29f`, kept as the branch
+  `checkpoint-anim-audit-baseline` on GitHub (and the local tag `anim-audit-baseline`). To undo the
+  whole repair: `git checkout checkpoint-anim-audit-baseline -- src public tools test`. Each unit's
+  repair is its own commit, so one unit can be reverted alone.
 * **Shared systems** (a change here affects several units):
   * `src/game/rendering/Sprites.ts`: view steadying (`turnTo`), movement tracking (`track`,
     `going`), frame lookup and drawing (`frame`, `blit`, `blitFall`), corpse drawing, pruning.
