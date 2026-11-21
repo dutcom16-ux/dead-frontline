@@ -1,10 +1,9 @@
 # usage: python3 tools/slice_sprites.py
 # Cuts the supplied sprite sheets into transparent atlases + JSON for the game (public/sprites/):
-#   assets/source/military_soldier_sheet.png (Military_Soldier_Sprite_Sheet.png) -> military8.*:
-#       every infantry soldier: walk, idle, fire, die in 8 directions (see the section at the end)
 #   assets/source/zombie_soldier_8dir.png (8089.png) -> infected_soldier8.*: soldiers who turned
 #   assets/source/squad_zombie_sheet.png  (8086.png) -> zombies.*: the infected
 #   assets/source/troops_sheet.png        (8085.png) -> effects.*: explosion, smoke, blood, sparks
+# (The infantry soldier, soldier16.*, is rendered by tools/soldier3d/game_atlas.py.)
 # Each atlas is a 256-colour PNG with alpha; the JSON lists frames (x, y, w, h, anchor ax/ay, scale k,
 # muzzle mx/my for firing frames) and clips.
 import json, os
@@ -297,19 +296,6 @@ def sheet8(path, rows_y):
         out[DIRS8[r]] = items
     return out
 
-def olive(items):
-    """re-dye the infected soldier's desert camouflage to the olive uniform of the military sheet
-    (only the tan cloth: skin, blood and dark gear are left alone)"""
-    out = []
-    for im, anc, mz, k in items:
-        a = np.asarray(im).astype(np.float32)
-        R, G, B = a[..., 0], a[..., 1], a[..., 2]
-        sat = np.clip((R - B - 30) / 40.0, 0, 1) * ((R >= G - 4) & (G >= B)).astype(np.float32)
-        tgt = np.dstack([R * 0.55, G * 0.66, B * 0.45])
-        a[..., :3] = a[..., :3] * (1 - sat[..., None]) + tgt * sat[..., None]
-        out.append((Image.fromarray(np.clip(a, 0, 255).astype(np.uint8), "RGBA"), anc, mz, k))
-    return out
-
 print("infected_soldier8")
 ZS = sheet8(os.path.join(ROOT, "assets/source/zombie_soldier_8dir.png"), [78, 233, 380, 526, 668, 802, 930, 1056])
 S8 = Atlas()
@@ -322,176 +308,8 @@ def reach8(items, d):
         up = ys < ys.min() + 0.7 * (ys.max() - ys.min())
         return float(((xs[up] - it[1][0]) * vx + (ys[up] - it[1][1]) * vy).max())
     return sorted(items, key=r)
+# (the sheet's desert camouflage is kept: it matches the desert soldier, soldier16.*)
 for d in DIRS8:
-    S8.add("z_walk_" + d, olive(ZS[d][0:5])); S8.add("z_attack_" + d, olive(reach8(ZS[d][5:7], d))); S8.add("z_die_" + d, olive(ZS[d][7:10]))
+    S8.add("z_walk_" + d, ZS[d][0:5]); S8.add("z_attack_" + d, reach8(ZS[d][5:7], d)); S8.add("z_die_" + d, ZS[d][7:10])
 S8.save(os.path.join(OUT, "infected_soldier8.png"), os.path.join(OUT, "infected_soldier8.json"),
-        "user-supplied 8-direction sheet 8089.png (infected soldier), re-dyed olive; tools/slice_sprites.py", STAND8)
-
-
-# ---------------------------------------------------------------- military personnel sheet
-# assets/source/military_soldier_sheet.png ("Military_Soldier_Sprite_Sheet.png", 1536x1024, transparent).
-# Three labelled sections, each with eight direction groups left to right: N, NE, E, SE, S, SW, W, NW.
-#   WALKING: 3 frames per direction (two strides and a passing step).
-#   FIRING:  3 frames per direction (aim and recoil).
-#   DYING:   6 frames per direction: 3 staggering frames, then a 4th below them and two lying frames.
-# Checks made on the drawings:
-#   * N, NE, E, S, SW, W and NW are drawn as labelled.
-#   * The SE groups are drawn facing east (backpack to the viewer, rifle level to the right), so a
-#     soldier heading south-east would look as if walking away and his rifle would be 45 degrees off.
-#     SE is therefore the SW group mirrored (front three-quarter, rifle down-right). The sheet's SE
-#     frames are cut and reported but not used.
-#   * Some firing frames touch their neighbours (rifles): they are split at the narrowest gap between
-#     the figures, not at guessed coordinates.
-#   * The dying section is drawn 11-20 % smaller than walking: each direction's dying frames are scaled
-#     so the standing ones match that direction's walking height.
-SRC_MIL = os.path.join(ROOT, "assets/source/military_soldier_sheet.png")
-MIL = np.asarray(Image.open(SRC_MIL).convert("RGBA"))
-MDIRS = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"]
-MGROUPS = [0, 214, 411, 597, 780, 965, 1147, 1330, 1536]   # x ranges of the eight direction groups
-# rifle directions as drawn, in screen space (x right, y down); S points at the viewer
-AIM = {"N": (0, -1), "NE": (0.6, -0.8), "E": (1, 0), "SE": (0.94, 0.34), "S": (0, 1), "SW": (-0.94, 0.34), "W": (-1, 0), "NW": (-0.6, -0.8)}
-
-def m_boxes(y0, y1, thr, dil):
-    """figure boxes per direction group in a band of the sheet"""
-    sub = MIL[y0:y1, :, 3] > thr
-    if dil: sub = ndimage.binary_dilation(sub, iterations=dil)
-    lb, _ = ndimage.label(sub)
-    out = {g: [] for g in range(8)}
-    for sl in ndimage.find_objects(lb):
-        ys, xs = sl
-        if int((MIL[y0:y1][sl][..., 3] > thr).sum()) < 150: continue
-        cx = (xs.start + xs.stop) / 2
-        g = max(i for i in range(8) if MGROUPS[i] <= cx)
-        out[g].append([xs.start, ys.start + y0, xs.stop, ys.stop + y0])
-    for g in out: out[g].sort()
-    return out
-
-def m_split(box, n):
-    """split a box holding n touching figures at the n-1 narrowest columns between them"""
-    x0, y0, x1, y1 = box
-    col = (MIL[y0:y1, x0:x1, 3] > 128).sum(axis=0).astype(float)
-    w = x1 - x0; cuts = [x0]
-    for k in range(1, n):
-        c = k * w / n; lo, hi = int(c - w / (3 * n)), int(c + w / (3 * n))
-        cuts.append(x0 + lo + int(np.argmin(col[lo:hi])))
-    cuts.append(x1)
-    return [[cuts[i], y0, cuts[i + 1], y1] for i in range(n)]
-
-def m_crop(box):
-    """the figure in a box: its own pixels only (inside its box, its largest connected part, so no
-    stray bits of a neighbour's rifle and no faint background), soft edge kept, ground shadow dropped"""
-    x0, y0, x1, y1 = box
-    a = MIL[max(0, y0 - 1):y1 + 1, max(0, x0):x1].copy()
-    lb, n = ndimage.label(ndimage.binary_dilation(a[..., 3] > 60, iterations=1))
-    if n:      # always: the background's faint alpha would show as a pale box
-        sz = ndimage.sum(a[..., 3] > 60, lb, range(1, n + 1))
-        a[..., 3] = np.where((lb == int(np.argmax(sz)) + 1) & (a[..., 3] > 12), a[..., 3], 0)
-    # faint grey ground shadow under the boots: low alpha at foot level
-    ys = np.nonzero(a[..., 3] > 128)[0]
-    if len(ys):
-        bot = ys.max(); a[bot + 1:, :, 3] = 0
-    return a
-
-def body(a):
-    """(top of helmet, feet) rows and head/hip x: the rifle (a thin barrel) is not counted as height"""
-    m = a[..., 3] > 128
-    widths = m.sum(axis=1); ys = np.nonzero(widths)[0]
-    top = next(y for y in ys if widths[y] >= 12)
-    bot = ys.max()
-    h = bot - top
-    head = np.nonzero(m[top:top + max(2, int(0.1 * h))].any(axis=0))[0].mean()
-    hipband = m[top + int(0.5 * h): top + int(0.62 * h) + 1]
-    hip = np.nonzero(hipband.any(axis=0))[0].mean() if hipband.any() else head
-    return top, bot, head, hip
-
-def m_scale(a, k):
-    im = Image.fromarray(a, "RGBA")
-    if abs(k - 1) > 1e-3: im = im.resize((max(1, round(im.width * k)), max(1, round(im.height * k))), Image.LANCZOS)
-    al = np.asarray(im)[..., 3]; ys, xs = np.nonzero(al > 20)
-    return im.crop((max(0, xs.min() - 1), max(0, ys.min() - 1), min(im.width, xs.max() + 2), min(im.height, ys.max() + 2)))
-
-def muzzle(im, d):
-    """barrel tip of a firing frame: the dark rifle pixel furthest along the aim direction"""
-    a = np.asarray(im); m = a[..., 3] > 128
-    top, bot, head, hip = body(a); h = bot - top
-    dark = m & (a[..., :3].max(axis=2) < 52)
-    ys, xs = np.nonzero(dark)
-    keep = ys < top + 0.5 * h                       # the rifle is held at chest height (knee pads and boots are black too)
-    ys, xs = ys[keep], xs[keep]
-    if d == "S":
-        # rifle pointing at the viewer, held at the middle of the chest: the muzzle is the lower end of
-        # the black rifle shape in a narrow central column (pouches at the hips are dark too)
-        c = (np.abs(xs - head) < 0.12 * a.shape[1]) & (ys > top + 0.2 * h) & (ys < top + 0.45 * h)
-        ys, xs = ys[c], xs[c]
-        i = int(np.argmax(ys))
-        return int(xs[i]), int(ys[i])
-    vx, vy = AIM[d]; cx, cy = head, top + 0.35 * h
-    i = int(np.argmax((xs - cx) * vx + (ys - cy) * vy))
-    return int(xs[i]), int(ys[i])
-
-def anchor_stand(im):
-    a = np.asarray(im); top, bot, head, hip = body(a)
-    return ((head + hip) / 2, float(bot + 1))
-def anchor_lying(im):
-    a = np.asarray(im); ys, xs = np.nonzero(a[..., 3] > 128)
-    return (float((xs.min() + xs.max()) / 2), float(ys.max() + 1 - 0.45 * (ys.max() - ys.min())))
-
-print("military8")
-walkB = m_boxes(115, 262, 60, 1)
-fireB = m_boxes(412, 582, 128, 0)
-topB = m_boxes(748, 866, 60, 1)
-botB = m_boxes(860, 1000, 60, 1)
-for g in range(8):
-    # touching firing frames: split by the narrowest gap
-    while len(fireB[g]) < 3:
-        wi = max(range(len(fireB[g])), key=lambda i: fireB[g][i][2] - fireB[g][i][0]); b = fireB[g][wi]
-        n = 3 - len(fireB[g]) + 1
-        fireB[g] = sorted(fireB[g][:wi] + m_split(b, n) + fireB[g][wi + 1:])
-    assert len(walkB[g]) == 3 and len(fireB[g]) == 3 and len(topB[g]) == 3 and len(botB[g]) == 3, (g, len(walkB[g]), len(fireB[g]), len(topB[g]), len(botB[g]))
-
-H0 = float(np.median([(lambda t: t[1] - t[0])(body(m_crop(b))) for g in range(8) for b in walkB[g]]))
-M8 = Atlas(); report = []
-clips = {}
-for g, d in enumerate(MDIRS):
-    walk = [m_crop(b) for b in walkB[g]]; fire = [m_crop(b) for b in fireB[g]]
-    # dying: three staggering frames, the standing one below them, then the two lying ones (upper, lower)
-    bot = sorted(botB[g], key=lambda b: (b[3] - b[1]), reverse=True)
-    stand4 = bot[0]; lying = sorted(bot[1:], key=lambda b: b[1])
-    die = [m_crop(b) for b in topB[g]] + [m_crop(stand4)] + [m_crop(b) for b in lying]
-    hw = [body(a)[1] - body(a)[0] for a in walk]; hf = [body(a)[1] - body(a)[0] for a in fire]
-    hd = [body(a)[1] - body(a)[0] for a in die[:4]]
-    mw, mf = float(np.median(hw)), float(np.median(hf))
-    kdie = float(np.median(hw)) / float(np.median(hd))
-    # per-frame size noise is pulled to the clip's own median (at most +-6 %)
-    W = [m_scale(a, float(np.clip(mw / h, 0.94, 1.06))) for a, h in zip(walk, hw)]
-    F = [m_scale(a, float(np.clip(mf / h, 0.94, 1.06))) for a, h in zip(fire, hf)]
-    D = [m_scale(a, kdie * float(np.clip(np.median(hd) / h, 0.94, 1.06))) for a, h in zip(die[:4], hd)] + [m_scale(a, kdie) for a in die[4:]]
-    # walk cycle: the frame with the narrowest stance is the passing step -> stride, pass, stride, pass
-    spread = []
-    for im in W:
-        a = np.asarray(im)[..., 3] > 128; ys = np.nonzero(a.any(axis=1))[0]; foot = a[ys.max() - max(3, (ys.max() - ys.min()) // 7):]
-        xs = np.nonzero(foot.any(axis=0))[0]; spread.append(xs.max() - xs.min())
-    p = int(np.argmin(spread)); s1, s2 = [i for i in range(3) if i != p]
-    cycle = [s1, p, s2, p]
-    # firing: aim = the middle barrel position, shot = barrel furthest out, recoil = furthest back
-    fitems = [(im, anchor_stand(im), muzzle(im, d), 1.0) for im in F]
-    proj = [((mz[0] - an[0]) * AIM[d][0] + (mz[1] - an[1]) * AIM[d][1]) if d != "S" else mz[1] for im, an, mz, k in fitems]
-    order = sorted(range(3), key=lambda i: proj[i])          # back ... out
-    aim, shot, recoil = order[1], order[2], order[0]
-    # one size for every direction: the sheet draws some directions up to ~5 % taller than others, so
-    # each direction is scaled (at draw time, field k) to the common standing height
-    kd = H0 / mw
-    fitems = [(im, an, mz, kd) for im, an, mz, _ in fitems]
-    witems = [(im, anchor_stand(im), (0, 0), kd) for im in W]
-    ditems = [(im, anchor_stand(im), (0, 0), kd) for im in D[:4]] + [(im, anchor_lying(im), (0, 0), kd) for im in D[4:]]
-    clips[d] = {"walk": [witems[i] for i in cycle], "idle": [witems[p]], "fire": [fitems[aim], fitems[shot], fitems[recoil]], "die": ditems}
-    report.append(f"  {d:2s}: walk {[round(h) for h in hw]} px (x{kd:.3f}), cycle {cycle}; fire order aim/shot/recoil {aim}/{shot}/{recoil}; dying x{kdie:.2f}")
-# SE: the sheet's SE groups are drawn facing east, rifle tilted slightly down (no three-quarter
-# front-right art). They are used as drawn: mirroring the SW groups instead would put the rifle in
-# the left hand in this one view. (Fallback for missing art: see docs/ANIMATION_QA.md, S9.)
-for d in MDIRS:
-    for k in ("walk", "idle", "fire", "die"):
-        M8.add(f"{k}_{d}", clips[d][k])
-M8.save(os.path.join(OUT, "military8.png"), os.path.join(OUT, "military8.json"),
-        "user-supplied Military_Soldier_Sprite_Sheet.png; SE as drawn (facing east, no SE art); tools/slice_sprites.py", round(H0))
-print("\n".join(report)); print(f"  standing height {H0:.0f} px; SE groups used as drawn (facing east)")
+        "user-supplied 8-direction sheet 8089.png (infected soldier); tools/slice_sprites.py", STAND8)

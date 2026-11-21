@@ -3,83 +3,73 @@
 Soldiers, infected and combat effects come from the sprite sheets below. Every other visual and every
 sound is generated in code. When you have more art, this is where it plugs in.
 
-All sheets are cut by `python3 tools/slice_sprites.py` into packed atlases in `public/sprites/`
+The infantry soldier is rendered from a 3D rig by `python3 tools/soldier3d/game_atlas.py`. The other
+sheets are cut by `python3 tools/slice_sprites.py`. Both write packed atlases to `public/sprites/`
 (256-colour PNG with alpha plus a JSON frame list). Each frame stores its feet anchor (`ax`, `ay`), an
 optional scale (`k`) and, for firing frames, the barrel tip (`mx`, `my`). Record each source sheet's
 licence here: the Vercel site is public, so the sheets must be ones you may redistribute.
 
-| Atlas | Source (`assets/source/`) | Used for |
+| Atlas | Source | Used for |
 |---|---|---|
-| `military8.*` | `military_soldier_sheet.png` (Military_Soldier_Sprite_Sheet.png) | every infantry soldier, all classes; military civilians |
-| `infected_soldier8.*` | `zombie_soldier_8dir.png` (8089.png) | soldiers who turned into infected |
-| `zombies.*` | `squad_zombie_sheet.png` (8086.png) | the infected |
-| `effects.*` | `troops_sheet.png` (8085.png) | explosion, smoke, blood, sparks |
-| not cut yet | `desert_soldier/soldier_16dir_*.png` (rendered by `tools/soldier3d/`, free to redistribute) | not used yet: desert-camo rifleman in 16 directions, with idle, walk, fire and death clips |
+| `soldier16.*` | the soldier rig in `tools/soldier3d/` (made for this project, free to redistribute) | every infantry soldier, all classes; military civilians |
+| `infected_soldier8.*` | `assets/source/zombie_soldier_8dir.png` (8089.png) | soldiers who turned into infected |
+| `zombies.*` | `assets/source/squad_zombie_sheet.png` (8086.png) | the infected |
+| `effects.*` | `assets/source/troops_sheet.png` (8085.png) | explosion, smoke, blood, sparks |
 
-The desert soldier sheets are described in `assets/source/desert_soldier/README.md`. Unlike the drawn
-sheets, they have south-east art and all 16 directions, and every frame is rendered from one rig at one
-size with the feet at the same point.
+`assets/source/desert_soldier/` holds the same soldier as stand-alone sheets with a preview (see its
+README). `assets/source/military_soldier_sheet.png` (Military_Soldier_Sprite_Sheet.png) was the
+previous soldier sheet. It is no longer used and nothing cuts it.
 
-## Military personnel sheet (`public/sprites/military8.*`)
+## Infantry soldier (`public/sprites/soldier16.*`)
 
-* **Source layout** (1536 × 1024, transparent background): three labelled sections, WALKING,
-  FIRING and DYING. Each has eight direction groups, left to right: N, NE, E, SE, S, SW, W, NW
-  (N = back to the viewer, S = facing the viewer, then clockwise).
-  * Walking: 3 frames per direction (two strides and a passing step).
-  * Firing: 3 frames per direction.
-  * Dying: 6 frames per direction (three staggering frames, a fourth below them, two lying frames).
-* **Slicing** (found from the image, not from guessed coordinates):
-  * Figures are found as connected shapes in the alpha channel within each section and direction
-    group. Every group must give exactly 3 + 3 + 6 frames, or the slicer stops.
-  * Some firing frames touch their neighbour (a rifle crosses the gap): such a shape is split at the
-    narrowest column between the figures.
-  * Each crop keeps only its own figure (no piece of a neighbour's rifle) and drops the faint
-    background alpha and the ground shadow under the boots.
-* **Corrections:**
-  * The SE groups are drawn facing east (backpack to the viewer, rifle tilted slightly down to the
-    right): there is no south-east art. They are used as drawn, as a fallback for the missing view.
-    Mirroring the SW groups instead would put the rifle in the left hand in that one view.
-  * The dying section is drawn about 11–20 % smaller than the walking one. Each direction's dying
-    frames are scaled so the standing ones match that direction's walking height.
-  * Frame-to-frame size noise within a clip is evened out (at most ±6 %).
-  * The sheet draws some directions up to about 5 % taller than others (N tallest, W shortest).
-    Every direction is scaled at draw time (frame field `k`) to one standing height.
-  * Standing frames are anchored at the feet, between head and hips, so a step doesn't shift the
-    figure. Lying frames are anchored at the body's middle.
-* **Clips** (`<D>` = N, NE, E, SE, S, SW, W, NW):
+* **Source:** a desert-camo rifleman built from 3D shapes and rendered from a 3/4 camera
+  (`tools/soldier3d/soldier3d.py` for the rig, `anims.py` for the poses). Every frame comes from the
+  same rig at the same scale, so the figure doesn't change between frames, clips or views.
+* **Views:** 16, every 22.5°: N, NNE, NE, ENE, E, ESE, SE, SSE, S, SSW, SW, WSW, W, WNW, NW, NNW
+  (N = back to the viewer, S = facing the viewer, clockwise). They are listed in the JSON's `views`.
+* **Building it:** `cd tools/soldier3d && python3 game_atlas.py` (about 5 minutes on 2 cores, needs
+  numpy and Pillow). The frames have no ground shadow and no muzzle flash (the game draws the flash on
+  real shots). Each frame is trimmed to the figure.
+* **Anchors:** every frame is anchored at the same ground point between the feet, standing or lying,
+  so switching clips never shifts the figure. Standing height (`ref`) is 94 px in every view.
+* **Barrel:** each firing frame has the muzzle's exact position (`mx`, `my`, projected from the rig)
+  and `md` = [dx, dy, length]: the barrel's direction on screen and how much of it shows (1 = side on,
+  under 0.45 = pointing at or away from the viewer).
+* **Clips** (`<V>` = one of the 16 views):
 
   | Clip | Frames |
   |---|---|
-  | `walk_<D>` | stride, passing step, other stride, passing step (the passing step is the frame with the narrowest stance) |
-  | `idle_<D>` | the passing step (standing) |
-  | `fire_<D>` | aim, shot, recoil (ordered by how far the barrel is pushed out); each has its barrel tip `mx`, `my` |
-  | `die_<D>` | the six dying frames, in order |
+  | `walk_<V>` | 12: two steps with the rifle at the low ready, starting on the left heel strike |
+  | `idle_<V>` | 8: breathing at the low ready |
+  | `fire_<V>` | 3: aim, shot (recoil starting), recoil (casing ejected), from a shouldered aim |
+  | `die_<V>` | 12: hit, knees buckle, rifle dropped, falls face down, lies still |
 
-  The barrel tip is the dark rifle pixel furthest along the view's aim direction, in the upper half of
-  the figure. For N the rifle points up past the helmet; for S it points at the viewer from the chest.
 * **In the game** (`src/game/rendering/Sprites.ts`, `soldierPose` and `dyingPose`):
   * State by priority: dying (from the soldier's corpse) > firing > walking > idle.
   * Firing faces the target. Each real shot (`Unit.shotN`, counted in `Combat.fire`) shows the shot
     frame for 0.06 s with the muzzle flash, then the recoil frame for 0.08 s, then aim. Automatic
     weapons (under 0.25 s between rounds: carbine, SMG, special-forces rifle, machine gun,
     flamethrower) hold the shot frame through a burst, with the flash on every round, and recoil once
-    when the burst ends. Soldiers whose
-    weapon fires on the move keep the firing stance while moving; machine gunners, snipers and
-    rocket troops walk and fire only when stopped.
-  * A walk starts on its first stride frame (a step), never mid-cycle; stopping shows the standing
-    (passing) frame.
-  * Walking faces the way the soldier really goes. The cycle (two steps) advances with the distance
-    covered: 1.4 m plus 0.25 m per m/s of speed, about 2.3 m at a rifleman's 3.6 m/s and shorter at a
-    slow formation pace. The feet don't slide.
-  * Idle stands breathing (the figure stretches 0.6 % from the feet, which stay put); in a halted line, box, circle or defensive formation
-    or on hold/defend orders, the soldier stands at the ready (aim frame).
+    when the burst ends. Soldiers whose weapon fires on the move keep the firing stance while moving;
+    machine gunners, snipers and rocket troops walk and fire only when stopped.
+  * Bullets leave the rifle as drawn: each tracer starts at the barrel tip of the shooter's shot frame
+    in the view he is shown in (`Sprites.muzzleOf`, used by `SceneRender`), and follows him if he moves.
+    Without a drawn figure (off screen, or the sheet failed to load) it starts at `gunTip`.
+  * A walk starts on its first frame (a step), never mid-cycle; stopping shows the idle clip.
+  * Walking faces the way the soldier really goes. The cycle (two steps, 12 frames) advances with the
+    distance covered: 1.4 m plus 0.25 m per m/s of speed, about 2.3 m at a rifleman's 3.6 m/s and
+    shorter at a slow formation pace. The feet don't slide.
+  * Idle plays the breathing clip at 6 fps, each soldier at his own phase. In a halted line, box,
+    circle or defensive formation or on hold/defend orders, the soldier stands at the ready (aim frame).
   * Turning: one view at a time through the views in between; a view is kept until the heading is
-    clearly past it; a turn is never undone within 0.3 s; aim is held for 0.8 s after a target drops.
-  * Dying plays the six frames once at 10 fps from the moment of death (game time), in the view the
-    soldier was last shown in. The last frame stays.
-  * Muzzle flash: drawn in code at the barrel tip of the frame shown, pointing along the rifle. A small
-    yellow-orange flame with a white-hot centre and a faint glow, about 15 % of the figure's height (a
-    short star for N and S). Only on the shot frame, so nothing stays lit between shots.
+    clearly past it (15° either side of a 22.5° view); a turn is never undone within 0.3 s; aim is held
+    for 0.8 s after a target drops.
+  * Dying plays the 12 frames once at 10 fps (1.2 s) from the moment of death (game time), in the view
+    the soldier was last shown in. The last frame stays.
+  * Muzzle flash: drawn in code at the barrel tip of the frame shown, along the barrel's direction on
+    screen (`md`). A small yellow-orange flame with a white-hot centre and a faint glow, about 15 % of
+    the figure's height (a short star when the rifle points at or away from the viewer). Only on the
+    shot frame, so nothing stays lit between shots.
   * `test/anim.mjs` checks all of this.
 
 ## Infected soldier sheet (`public/sprites/infected_soldier8.*`)
@@ -92,7 +82,9 @@ size with the feet at the same point.
 * **Slicing:** by grid cell (some frames touch). Each row is scaled so the standing figure is 100 px
   tall, because the sheet's rows are not drawn at one size. Standing frames are anchored at the hips
   (the stride doesn't shift the body); kneeling and lying ones at the body's middle. Reach frames are
-  ordered by how far the arm reaches along the view (ready, grab).
+  ordered by how far the arm reaches along the view (ready, grab). The sheet's desert camouflage is
+  kept as drawn, so a soldier who turns still wears the desert soldier's uniform. (It used to be
+  re-dyed olive to match the previous soldier sheet.)
 * **Clips:** `z_walk_<D>`, `z_attack_<D>`, `z_die_<D>`.
 * **In the game** (`zpose8`): steadied 8-direction views as for soldiers, facing the way he really
   moves or his victim. The step cycle (stride frames 1-2-3-4-3-2 when hurrying, 0-1-2-3-2-1 slower)
@@ -155,7 +147,8 @@ size with the feet at the same point.
 
 ## Survivors and 3D figures
 
-* Military survivors are drawn from the military sheet: walk cycle while moving, standing otherwise.
+* Military survivors are drawn from the soldier sheet (`soldier16`): walk cycle while moving, the
+  breathing idle clip otherwise.
 * Other survivors are 3D figures: three poses (feet together, left foot forward, right foot forward)
   alternate with the distance walked, and arms swing against the legs.
 * The abomination steps: three 3D poses (feet together, left foot forward, right foot forward, arms

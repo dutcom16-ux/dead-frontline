@@ -173,7 +173,13 @@ export class SceneRender {
         if (fxSprites && (e.kind === "blast" || e.kind === "smoke" || e.kind === "hit" || e.kind === "spark")) continue; // sprite sheet effects
         const f = e.t / e.life;
         switch (e.kind) {
-          case "tracer": tracers.push(e.x, e.z, -e.y, e.x2!, e.z2!, -e.y2!); break;
+          case "tracer": {
+            // an infantry soldier's tracer leaves the barrel of his figure as drawn (sprite sheet)
+            const m = e.owner !== undefined ? this.sprites.muzzleOf(g, e.owner) : null;
+            if (m) tracers.push(m[0], m[2], -m[1], e.x2!, e.z2!, -e.y2!);
+            else tracers.push(e.x, e.z, -e.y, e.x2!, e.z2!, -e.y2!);
+            break;
+          }
           case "blood": this.put("m_blood", e.x, e.y, e.z, e.x * 7, C.blood, e.s); break;
           case "scorch": this.put("m_blood", e.x, e.y, e.z + 0.01, e.y, C.scorch, e.s); break;
           case "blast": this.put("m_blast", e.x, e.y, e.z, 0, [2.2 - f, 1.2 - f * 0.9, 0.35], e.s * (0.3 + f * 0.8)); break;

@@ -43,8 +43,10 @@ Note that this is not the order of the existing sheets in this folder (those sta
 The JSON files use the TexturePacker "JSON Hash" layout: frames are named like `walk_SE_03`, and
 `meta.frameTags` lists every clip × direction with its frames, fps and loop flag.
 
-These sheets are not wired into the game yet. `tools/slice_sprites.py` would need a cutter for them
-to produce a `public/sprites/` atlas like the other sheets.
+The game uses the same soldier through its own atlas, `public/sprites/soldier16.*`, built by
+`tools/soldier3d/game_atlas.py`. That atlas has the same 16 views and frames, without the ground
+shadow or the baked muzzle flash, and with the barrel tip of every firing frame (see
+`docs/ASSETS.md`).
 
 ## Regenerating
 
@@ -52,6 +54,7 @@ to produce a `public/sprites/` atlas like the other sheets.
 cd tools/soldier3d
 python3 render_all.py   # ~10 min on 2 cores, frames go to out/frames/
 python3 assemble.py     # sheets, JSON and preview go to out/final/
+python3 game_atlas.py   # the game's atlas, public/sprites/soldier16.* (~5 min)
 ```
 
 Needs Python 3 with numpy and Pillow. Proportions, gear and colours are in `soldier3d.py`, and the

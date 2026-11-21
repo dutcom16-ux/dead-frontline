@@ -44,7 +44,7 @@ can install it as an app from Chrome, Edge or Brave.
 | Infection | ✔ a bite can infect a soldier (5 % per bite on medium, less with armour; ×0.5 on low, ×1.5 on high). He turns 22–36 s later (countdown over his head), and the new infected goes for his own squad. A soldier killed while infected rises 4 s later |
 | Corpse piles | ✔ bodies stack where they fall (1.5 m cells, about 0.17 m per body, up to 1.7 m). Piles slow anyone crossing them, lift whoever stands on them, and once a pile reaches the top of sandbags, a barricade, a concrete barrier, an MG nest or a wreck, the infected climb over it |
 | Commands | ✔ move, attack-move, attack (focus fire), stop, hold, defend, patrol, follow, retreat, interact, board/unload, build, clear wreck |
-| Infantry (10) | ✔ rifleman, assault, sniper, machine gunner, shotgun, flamethrower, rocket, medic (heals), engineer (builds, clears), special forces. The starting squad has 9: two riflemen, assault, MG, sniper, shotgun, rocket, medic, engineer. Drawn from your military personnel sprite sheet in 8 directions: walking, firing toward the target (dedicated north and south stances, a small muzzle flash at the barrel on every shot) and dying (plays once, the body stays) |
+| Infantry (10) | ✔ rifleman, assault, sniper, machine gunner, shotgun, flamethrower, rocket, medic (heals), engineer (builds, clears), special forces. The starting squad has 9: two riflemen, assault, MG, sniper, shotgun, rocket, medic, engineer. Drawn from the desert soldier sheet (rendered from one 3D rig) in 16 directions: breathing idle, walking, firing toward the target (a small muzzle flash at the barrel on every shot, and the tracer leaves the barrel) and dying (falls face down, plays once, the body stays) |
 | Vehicles (6) | ✔ jeep, APC, IFV, tank, transport truck (ammo for nearby infantry), recovery vehicle (repairs). You get them through logistics once the FOB motor pool is built, and they arrive at the FOB gate. They crush infected, carry passengers (right-click a vehicle to board, U to unload) and draw as simple box models |
 | Infected (8) | ✔ walker, runner, crawler, brute (knockback, breaks doors), bloater (explodes), screamer (calls hordes), mutant (leaps), Abomination (boss, ground slam). Drawn from your sprite sheets in steadied 8-direction views: walk, run and crawl cycles follow the distance moved, attacks land on the real hit, and the dead fall over before lying still (the Abomination stays a 3D model) |
 | Infected AI | ✔ sight with line of sight, hearing (gunfire, explosions, screams), pursuit with shared flow fields, swarming, losing targets, investigating noise, breaking doors and defences, attacking vehicles |
@@ -92,7 +92,7 @@ Results on the current map (your `toledo_poblacion.html` package, 422 OSM buildi
 | Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~67 game minutes (389 infected killed, 16 losses), all 19 survivors evacuated |
 | Systems check (`npm run test:systems`) | vehicles drive and carry passengers; engineer-built sandbags + MG emplacement stop a horde; artillery strike; debrief → strategic map with Toledo green and the next operation unlocked; 0 errors |
 | Phones (`npm run test:mobile`) | Android-sized landscape and portrait layouts with the squad chips and 14 commands; tap select works; 0 errors |
-| Soldier animation (`npm run test:anim`) | **35/35 checks pass.** Runs the real sprite drawing at 30 fps while a squad marches a square, turns about and fights; one soldier fires and walks in all 8 directions; each of the 10 classes fires at a target and moves past it; 8 soldiers die in 8 views. Checked: walk/idle/fire/dying frames in every direction at one standing height; barrel tips on the rifle (north stance above the helmet, south at the chest); views change one step at a time without flicker; the walk cycle follows distance and starts with a step; every shot shows the shot frame and its flash, never a flash without a shot; automatic weapons stay steady through a burst, single shots kick once; classes that fire on the move keep the firing stance, the others walk; dying plays once and holds; no pose for a dead soldier |
+| Soldier animation (`npm run test:anim`) | **35/35 checks pass.** Runs the real sprite drawing at 30 fps while a squad marches a square, turns about and fights; one soldier fires and walks in all 8 main directions; each of the 10 classes fires at a target and moves past it; 8 soldiers die in 8 views. Checked: walk/idle/fire/dying frames in all 16 views at one standing height; barrel tips on the rifle and the barrel pointing the view's way (north stance above the helmet, south at the chest); views change one step at a time without flicker; the walk cycle follows distance and starts with a step; every shot shows the shot frame and its flash, never a flash without a shot; automatic weapons stay steady through a burst, single shots kick once; classes that fire on the move keep the firing stance, the others walk; dying plays once and holds; no pose for a dead soldier |
 | Unit animation (`npm run test:units`) | **82/82 checks pass.** Every infected type walks out in 8 directions, stands, sprints in from 30 m, attacks a soldier and dies; turned soldiers, survivors (sprite and 3D) and the abomination likewise; then a crowd of 200. Checked per type: views step one at a time without flicker and match the direction of travel; each view uses its own drawn clip; cycles follow distance at a cadence that suits the pace (at most 12.4 frame changes a second when sprinting); standing keeps one frame, side-on with the feet together; every hit shows the full reach; deaths play once and the body stays; the abomination and 3D survivors alternate their steps with their feet on the ground; animation state is freed for the dead |
 | Game-wide animation (`npm run test:battle`) | **10/10 checks pass.** 20 move orders in 8 s then a halt; selection and deselection while moving; 22 units (with a jeep and a tank) against 132 infected of every type from all sides, the squad advancing mid-fight. No skipped views or flicker across 151 animated figures, nobody walking on the spot, selection rings follow, deaths in combat play once and hold, no missing frames; sprite drawing 0.5 ms a frame on average |
 | Formations (`npm run test:formations`) | **20/20 checks pass, 0 page errors** — the 10 scenarios of the spec plus corpse-pile climbing, defensive positions, player commands and all six shapes (details below) |
@@ -179,14 +179,11 @@ run by the automated test.
 * **Pathing on this map.** Units now detour, sidestep corners and, as a last resort, step out to
   the street after about 12 s without progress. That last step is visible as a short hop. The causes
   are AI-detected footprints that overlap roads or each other, and OSM bridges that end at the bank.
-* **Soldier sprites.** The military sheet has no running, moving-while-firing, reloading or kneeling
+* **Soldier sprites.** The soldier sheet has no running, moving-while-firing, reloading or kneeling
   frames. Soldiers who fire on the move keep the firing stance while moving (their feet don't step);
-  there is no reload animation; formation soldiers stand at the ready instead of kneeling. Walking and
-  firing have 3 drawn frames per direction, so the walk cycle is stride, pass, stride, pass. The
-  sheet's south-east groups are drawn facing east, so a soldier going south-east is shown side-on
-  (as drawn, rifle in the right hand) until there is south-east art. All ten classes share the rifleman
-  sprite. Tracers start at the 3D rifle height, slightly below the
-  sprite's barrel.
+  there is no reload animation; formation soldiers stand at the ready instead of kneeling. All ten
+  classes share the rifleman sprite. Rockets still leave from the 3D launcher height (`gunTip`), not
+  the sprite's barrel. New poses can be added to the rig in `tools/soldier3d/anims.py`.
 * **Infected sprites.** The infected sheet is a collection of loosely related frames: rows mix
   different people and facings and are not in leg order. Clips are rebuilt from frames of one person
   and one facing (`docs/ASSETS.md`), but there is no front (south) walk, no NE/NW view and no falling
@@ -242,6 +239,7 @@ src/game/ui/               Hud, Menus          src/game/audio/  Sfx
 data/                      units, weapons, vehicles, infected, structures, supplies, campaign, missions (JSON)
 public/                    map package, sprite atlases, icons, manifest
 tools/slice_sprites.py     cuts the sheets in assets/source/ into public/sprites/
+tools/soldier3d/           3D soldier rig; game_atlas.py renders the soldier atlas (public/sprites/soldier16.*)
 tools/                     build, dev server, service-worker template
 test/                      headless playthrough
 ```
