@@ -26,6 +26,15 @@ export class Unit {
   burn = 0; flashT = 0; aimX = 0; aimY = 0; hitT = 0;
   /** shots fired (the sprite renderer starts the firing frames and the muzzle flash on each new shot) */
   shotN = 0;
+  /** where the rifle points (map angle): it comes round to the target before he fires, also on the move,
+   * and the sprite faces it while firing. NaN = not set yet (takes the heading) */
+  aimH = NaN;
+  /** how long the rifle has been on the current target (s): he fires once his sights settle */
+  aimSteady = 0;
+  /** game time he last had a target: standing, he keeps aiming there for a moment (AIM_HOLD) */
+  aimT = -9;
+  /** smoothed ground velocity (m/s), as the sprite measures it: the way he is seen to walk */
+  svx = 0; svy = 0;
   defendAt: [number, number] | null = null;
   rank = 0;
   // squad and formation (see units/Squads.ts)

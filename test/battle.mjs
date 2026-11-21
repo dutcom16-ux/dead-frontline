@@ -49,7 +49,7 @@ const r = await page.evaluate(() => {
       const st = sp.anim.get(e.id);
       if (!log.has(e.id)) log.set(e.id, { kind: name, seq: [] });
       const seq = log.get(e.id).seq;
-      if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, view: st ? st.dir : -1, nv: st ? st.nv : 8, anim: p.anim, x: e.x, y: e.y, moving: e.moving });
+      if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, view: st ? st.dir : -1, nv: st ? st.nv : 8, adeg: name === "soldierPose" && !isNaN(e.aimH) ? sp.compassDeg(a[2], e.aimH) : null, anim: p.anim, x: e.x, y: e.y, moving: e.moving });
       return p;
     };
   }
@@ -152,8 +152,11 @@ const r = await page.evaluate(() => {
         if (q.view !== a.view) {
           const nv = q.nv || 8;
           if (Math.min((q.view - a.view + nv) % nv, (a.view - q.view + nv) % nv) > 1) m.jumps++;
-          if (lastChange && lastChange.from === q.view && q.t - lastChange.t < 0.25) m.flicker++;
-          lastChange = { from: a.view, t: q.t };
+          // flicker = the view going back while the rifle hardly moved (a soldier's rifle swinging back to
+          // a new target is a real turn)
+          const swung = q.adeg != null && lastChange && lastChange.adeg != null && Math.abs(((q.adeg - lastChange.adeg + 540) % 360) - 180) >= 180 / nv;
+          if (lastChange && lastChange.from === q.view && q.t - lastChange.t < 0.25 && !swung) m.flicker++;
+          lastChange = { from: a.view, t: q.t, adeg: q.adeg };
         }
         // a walk clip on a figure that has not moved for 0.3 s: walking on the spot (stuck state)
         const still = Math.hypot(q.x - a.x, q.y - a.y) < 1e-4;

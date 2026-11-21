@@ -46,7 +46,13 @@ previous soldier sheet. It is no longer used and nothing cuts it.
 
 * **In the game** (`src/game/rendering/Sprites.ts`, `soldierPose` and `dyingPose`):
   * State by priority: dying (from the soldier's corpse) > firing > walking > idle.
-  * Firing faces the target. Each real shot (`Unit.shotN`, counted in `Combat.fire`) shows the shot
+  * Firing faces the target. A soldier's rifle (`Unit.aimH`, in the game logic) swings round to a new
+    target at about 400°/s and he only fires once it points within 7° of the target and has been steady
+    for 0.08 s. The figure always faces that rifle direction, also between targets (then the way he
+    walks, or his heading), and while firing it turns a view per frame with a 14° hold, so every shot
+    leaves a figure facing its target (`test/anim.mjs` checks every shot of the run). Between targets
+    the rifle stays on the last spot for 0.8 s, and infantry prefer the next target near where the rifle
+    already points (3 m per radian of swing), so they don't spin round and back. Each real shot (`Unit.shotN`, counted in `Combat.fire`) shows the shot
     frame for 0.06 s with the muzzle flash, then the recoil frame for 0.08 s, then aim. Automatic
     weapons (under 0.25 s between rounds: carbine, SMG, special-forces rifle, machine gun,
     flamethrower) hold the shot frame through a burst, with the flash on every round, and recoil once

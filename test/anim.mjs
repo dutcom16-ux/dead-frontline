@@ -7,6 +7,8 @@
 //              flicker, one view while walking straight, walk cycle tied to distance (no sliding)
 //   fight      while engaging (moving or not) never the walk clip; every shot starts the shot frame
 //              with a flash; no flash without a shot; flashes last at most the shot frame
+//   facing     every shot in the whole run is fired from a figure facing its target (the view shown
+//              is within one view of the target's direction)
 //   8 ways     one soldier fires at a target in each of the 8 screen directions (fire_<D>, flash
 //              toward the target) and walks in each of the 8 directions (walk_<D>)
 //   dying      soldiers killed in 8 different views: die_<D> from frame 0 to the last, once, and the
@@ -97,7 +99,8 @@ const r = await page.evaluate(async () => {
     const seq = log.get(u.id), st = sp.anim.get(u.id);
     const t = gg.get(u.target);
     const eng = !!t && !t.dead && u.losOk && (u.mag > 0 || u.reserve > 0);
-    if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, dir: st.dir, state: p.state, anim: p.anim, i: p.i, flash: p.flash, x: u.x, y: u.y, moving: u.moving, spd: st.spd, shotN: u.shotN, eng, wid: u.wid });
+    const tdeg = t && !t.dead ? sp.compassDeg(c, Math.atan2(t.y - u.y, t.x - u.x)) : null;   // target's direction on screen
+    if (!seq.length || seq[seq.length - 1].t < now) seq.push({ t: now, dir: st.dir, state: p.state, anim: p.anim, i: p.i, flash: p.flash, x: u.x, y: u.y, moving: u.moving, spd: st.spd, shotN: u.shotN, eng, wid: u.wid, tdeg, adeg: isNaN(u.aimH) ? null : sp.compassDeg(c, u.aimH) });
     return p;
   };
   const ui = { hover: null, box: null, ghost: null, showPaths: false };
@@ -152,10 +155,14 @@ const r = await page.evaluate(async () => {
       const a = seq[k - 1], b = seq[k];
       if (a.dir !== b.dir) {
         changes++;
-        if (Math.min((a.dir - b.dir + NV) % NV, (b.dir - a.dir + NV) % NV) > 1) jumps++;
-        if (lastChange && lastChange.from === b.dir && b.t - lastChange.t < 0.25) { flicker++; flickers.push({ id, t: +b.t.toFixed(2), anim: b.anim }); }
+        // (a figure off screen for a while is shown facing the right way when it comes back: not a jump)
+        if (b.t - a.t < 0.2 && Math.min((a.dir - b.dir + NV) % NV, (b.dir - a.dir + NV) % NV) > 1) jumps++;
+        // flicker = the view going back while the rifle hardly moved. Walking one way, then turning back to
+        // fire at a target on the other side, or the rifle swinging back to a new target, is a real turn
+        const swung = b.adeg !== null && lastChange && lastChange.adeg !== null && Math.abs(((b.adeg - lastChange.adeg + 540) % 360) - 180) >= 180 / NV;
+        if (lastChange && lastChange.from === b.dir && b.t - lastChange.t < 0.25 && lastChange.state === b.state && !swung) { flicker++; flickers.push({ id, t: +b.t.toFixed(2), anim: b.anim }); }
         if (lastChange && lastChange.from === b.dir && b.t - lastChange.t < 1) { wobble++; if (b.state === "walk") wobbleWalk++; }
-        lastChange = { from: a.dir, t: b.t };
+        lastChange = { from: a.dir, t: b.t, state: b.state, adeg: b.adeg };
       }
       // firing: a new shot shows the shot frame and the flash at once; flashes only right after shots
       if (b.shotN !== a.shotN) { shots++; lastShotT = b.t; if (/^fire_/.test(b.anim) && b.i === 1 && (b.flash || b.wid === "flamer")) shotsShown++; }
@@ -281,6 +288,16 @@ const r = await page.evaluate(async () => {
     const last = atlas.anims[want].length - 1, lastAt = tr.find((q) => q.i === last);
     return { want, anims: [...new Set(tr.map((q) => q.anim))], first: tr[0].i, mono, lastAt: lastAt ? +lastAt.t.toFixed(2) : null, held: tr.filter((q) => q.t > 1.25).every((q) => q.i === last), stateKept: sp.anim.has(u.id) };
   });
+  // ---------------- facing: every shot of the run, the view shown against the target's direction
+  const aim = { shots: 0, bad: 0, maxOff: 0, worst: [] };
+  for (const [id, seq] of log) for (let k = 1; k < seq.length; k++) {
+    const a = seq[k - 1], b = seq[k];
+    if (b.shotN === a.shotN || b.tdeg === null || !/^fire_/.test(b.anim)) continue;
+    const off = Math.abs(((b.tdeg - (b.dir * 360) / NV + 540) % 360) - 180);
+    aim.shots++; aim.maxOff = Math.max(aim.maxOff, off);
+    if (off > 360 / NV) { aim.bad++; if (aim.worst.length < 5) aim.worst.push({ id, t: +b.t.toFixed(2), off: +off.toFixed(1), anim: b.anim }); }
+  }
+  out.aim = aim;
   out.deadPoses = deadPoses; out.missing = missing;
   return out;
 });
@@ -298,6 +315,7 @@ const checks = [
   [M.straightChanges === 0 && M.straightTime > 20, `march: walking straight keeps one view: ${M.straightChanges} changes over ${M.straightTime} soldier-seconds`],
   [M.framesPerMetre > 0 && Math.abs(M.framesPerMetre - M.expectedPerMetre) < 0.05 && M.metresPerCycle > 1.4 && M.metresPerCycle < 2.7, `walk cycle tied to distance (no foot sliding): ${M.framesPerMetre.toFixed(3)} frames/m (expected ${M.expectedPerMetre.toFixed(3)}), ${M.metresPerCycle.toFixed(2)} m per cycle`],
   [F.shots > 20 && F.shotsShown === F.shots, `every shot starts the shot frame with its flash: ${F.shotsShown}/${F.shots}`],
+  [r.aim.shots > 50 && r.aim.bad === 0, `every shot is fired facing the target (view within ${(360 / 16).toFixed(1)}°): ${r.aim.shots - r.aim.bad}/${r.aim.shots} shots, at most ${r.aim.maxOff.toFixed(1)}° off ${r.aim.worst.length ? JSON.stringify(r.aim.worst) : ""}`],
   [F.flashNoShot === 0 && F.flashLong === 0 && F.flashesDrawn > 0, `no flash without a shot, none longer than the shot frame: ${F.flashNoShot} / ${F.flashLong} (${F.flashesDrawn} flashes drawn)`],
   [F.walkWhileEngaging === 0 && F.fireFrames > 0, `no walk clip while engaging a target: ${F.walkWhileEngaging} (${F.engagedMovingFrames} frames engaging on the move, firing stance)`],
   [fireWays.length === 8 && fireWays.every(([d, w]) => w.clips.length === 1 && w.clips[0] === "fire_" + d && w.shots > 0 && w.flashes > 0 && w.flashDirs.length === 1 && w.flashDirs[0] === d), `firing toward a target in all 8 directions: ${fireWays.map(([d, w]) => `${d}:${w.clips.join("/")}·${w.shots} shots·${w.flashes} flashes@${w.tip}`).join("  ")}`],

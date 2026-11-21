@@ -54,7 +54,7 @@ const IDLE_FPS = 6;
 const AUTO_S = 0.25;
 export type SoldierState = "idle" | "walk" | "fire";
 /** animation state of one figure: displayed view, cycle phase, measured movement, last shot / hit */
-interface Anim { dir: number; nv: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number; run: boolean; inst: number }
+interface Anim { dir: number; nv: number; po: number; prevDir: number; dirT: number; wantT: number; aimA: number; aimT: number; phase: number; lx: number; ly: number; lt: number; spd: number; vx: number; vy: number; shotT: number; shotN: number; state: SoldierState; stateT: number; atk: number; hitT: number; flip: boolean; mt: number; run: boolean; inst: number }
 /** the last pose an infected was drawn in (its fall starts from it) */
 interface LastPose { anim: string; i: number; flip: boolean; size: number; wide: number; tint: string; sheet: "Z" | "ZS"; view: Dir8 }
 /** metres covered by one loop of each infected clip (the loop advances with distance: no sliding) */
@@ -131,14 +131,32 @@ export class Sprites {
     const [sx, sy] = this.facing(cam, heading);
     return (90 - (Math.atan2(sy, sx) * 180) / Math.PI + 360) % 360;
   }
-  /** displayed view: hysteresis, settle time, one view at a time, no undoing a turn straight away */
-  private turnTo(st: Anim, cam: IsoCamera, heading: number, now: number, settle: number) {
-    const step = 360 / st.nv;
-    const off = (((this.compassDeg(cam, heading) - st.dir * step + 540) % 360) - 180);
-    if (Math.abs(off) <= step * 0.678) { st.wantT = -1; return; }   // half a view and a margin (30.5° of 45°)
+  /**
+   * Displayed view: hysteresis, settle time, one view at a time, no undoing a turn straight away.
+   * `aim` (firing): the view follows the rifle (Unit.aimH, a smooth logic angle) with a tighter hold, a
+   * view per frame and no delays, so the figure keeps up with the rifle coming round (faster than the
+   * 400°/s aim turn) and faces where it fires.
+   */
+  private turnTo(st: Anim, cam: IsoCamera, heading: number, now: number, settle: number, aim = false) {
+    const step = 360 / st.nv, deg = this.compassDeg(cam, heading), prev = st.po;
+    st.po = deg;
+    const off = (((deg - st.dir * step + 540) % 360) - 180);
+    const hold = step * (aim ? 0.62 : 0.678);  // half a view and a margin (30.5° of 45°; 14° of 22.5° when aiming)
+    if (Math.abs(off) <= hold) { st.wantT = -1; return; }
+    if (aim) {
+      if (now <= st.dirT) return;           // one view per frame
+      // the rifle is already swinging back toward this view: stay (no step out and straight back)
+      if (!isNaN(prev) && Math.abs(off) < Math.abs(((prev - st.dir * step + 540) % 360) - 180) - 0.5) return;
+      // going straight back to the view just left takes a clear swing of the rifle, not a wobble
+      const back = (st.dir + (off > 0 ? 1 : -1) + st.nv) % st.nv;
+      if (back === st.prevDir && now - st.dirT < 0.25 && Math.abs(off) < hold + 6) return;
+      st.prevDir = st.dir; st.dir = (st.dir + (off > 0 ? 1 : -1) + st.nv) % st.nv; st.dirT = now;
+      return;
+    }
+    const big = Math.abs(off) > step * 2;   // a real turn, not a wobble: follow it a view per frame
     if (st.wantT < 0) st.wantT = now;
-    if (now - st.wantT < settle) return;
-    if (now - st.dirT < 0.06) return;
+    if (now - st.wantT < (big ? 0 : settle)) return;
+    if (now - st.dirT < (big ? 0.02 : 0.06)) return;
     const next = (st.dir + (off > 0 ? 1 : -1) + st.nv) % st.nv;
     if (next === st.prevDir && now - st.dirT < 0.3) return;
     st.prevDir = st.dir; st.dir = next; st.dirT = now;
@@ -147,7 +165,7 @@ export class Sprites {
     let st = this.anim.get(u.id);
     if (st && st.nv !== nv) { st.dir = Math.round((st.dir * nv) / st.nv) % nv; st.prevDir = -1; st.nv = nv; }
     if (!st) {
-      st = { dir: Math.round(this.compassDeg(cam, heading) / (360 / nv)) % nv, nv, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9, run: false, inst: 0 };
+      st = { dir: Math.round(this.compassDeg(cam, heading) / (360 / nv)) % nv, nv, po: NaN, prevDir: -1, dirT: -1, wantT: -1, aimA: heading, aimT: -9, phase: (u.id % 4) * 0.25, lx: u.x, ly: u.y, lt: now, spd: 0, vx: 0, vy: 0, shotT: -9, shotN: (u as Unit).shotN ?? 0, state: "idle", stateT: now, atk: 0, hitT: -9, flip: false, mt: -9, run: false, inst: 0 };
       this.anim.set(u.id, st);
     }
     return st;
@@ -179,6 +197,7 @@ export class Sprites {
     const engaging = !!tgt && !tgt.dead && u.losOk && (u.mag > 0 || u.reserve > 0);
     const V = this.views();
     const st = this.stateOf(u, cam, u.heading, now, V.length);
+    const unseen = now - st.lt > 0.25;      // not drawn lately (off screen): no turn to watch
     // ground speed and velocity (smoothed) and distance covered since the last frame
     const moved = this.track(st, u.x, u.y, now, u.moving ? u.speedNow : 0);
     // a shot: the weapon's firing event counts it. The shot frame and flash start on the first frame
@@ -187,8 +206,9 @@ export class Sprites {
     const sinceShot = now - st.shotT;
     const moving = u.moving && st.spd > 0.3;
     // ---- state by priority
-    if (engaging) { st.aimA = Math.atan2(tgt.y - u.y, tgt.x - u.x); st.aimT = now; }
-    const aiming = engaging || sinceShot < SHOT_S + RECOIL_S || (now - st.aimT < AIM_HOLD_S && !moving);
+    // the view follows the rifle (Unit.aimH), which comes round to the target before the first shot
+    if (engaging) { st.aimA = isNaN(u.aimH) ? Math.atan2(tgt.y - u.y, tgt.x - u.x) : u.aimH; st.aimT = now; }
+    const aiming = engaging || sinceShot < SHOT_S + RECOIL_S || (now - st.aimT < AIM_HOLD_S && (!moving || canFireWhileMoving(u)));
     // moving and shooting is part of the game for most weapons: those soldiers keep the firing stance
     const firing = aiming && (!moving || canFireWhileMoving(u) || sinceShot < SHOT_S + RECOIL_S);
     const state: SoldierState = firing ? "fire" : moving ? "walk" : "idle";
@@ -199,7 +219,12 @@ export class Sprites {
     // ---- view: the rifle toward the target when firing; walking, the way he really goes (his heading
     // can lag behind or stay on a target he cannot shoot on the move); otherwise the way he faces
     const going = Math.hypot(st.vx, st.vy) > 0.8 ? Math.atan2(st.vy, st.vx) : u.heading;
-    this.turnTo(st, cam, firing ? st.aimA : state === "walk" ? going : u.heading, now, firing || moving ? 0.12 : 0.25);
+    // the figure faces where his rifle points (Unit.aimH): the target when firing, otherwise the way he
+    // walks or his heading, swinging round smoothly. Shown this way, he turns before the first shot and
+    // the view never has to catch up with a rifle pointing elsewhere.
+    const faceA = !isNaN(u.aimH) ? u.aimH : firing ? st.aimA : state === "walk" ? going : u.heading;
+    if (unseen) { st.dir = Math.round(this.compassDeg(cam, faceA) / (360 / st.nv)) % st.nv; st.prevDir = -1; st.wantT = -1; }
+    else this.turnTo(st, cam, faceA, now, firing ? 0.03 : moving ? 0.12 : 0.25, firing);
     const d = V[st.dir];
     if (state === "fire") {
       // shot, recoil, aim. Automatic weapons would cycle these several times a second (shaking): during
