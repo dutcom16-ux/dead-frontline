@@ -308,7 +308,7 @@ def reach8(items, d):
         up = ys < ys.min() + 0.7 * (ys.max() - ys.min())
         return float(((xs[up] - it[1][0]) * vx + (ys[up] - it[1][1]) * vy).max())
     return sorted(items, key=r)
-# (the sheet's desert camouflage is kept: it matches the desert soldier, soldier16.*)
+# (the sheet's tan desert camouflage is kept: it is close to the soldier's OCP pattern, soldier16.*)
 for d in DIRS8:
     S8.add("z_walk_" + d, ZS[d][0:5]); S8.add("z_attack_" + d, reach8(ZS[d][5:7], d)); S8.add("z_die_" + d, ZS[d][7:10])
 S8.save(os.path.join(OUT, "infected_soldier8.png"), os.path.join(OUT, "infected_soldier8.json"),

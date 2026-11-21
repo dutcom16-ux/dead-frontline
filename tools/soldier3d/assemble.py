@@ -116,7 +116,7 @@ def main():
     print("ok")
 
 
-README = """Desert soldier sprite sheets
+README = """Soldier sprite sheets (current-issue kit)
 ============================
 
 Frames: 160 x 160 px, transparent background, soft ground shadow included.
