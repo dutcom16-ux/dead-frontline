@@ -160,7 +160,7 @@ export function buildingBase(b, map) {
 
 // ---------------------------------------------------------------- buildings
 export function genBuilding(M, b, bid, lod, map) {
-  if (b.has_parts || b.hidden) return; // simple-3D-buildings convention: parts replace the outline
+  if (b.has_parts || b.hidden || b.sprite) return; // simple-3D-buildings convention: parts replace the outline; sprite buildings are drawn pre-rendered
   const A = ARCH[b.a] || ARCH.concrete_house_1f;
   const key = b.id;
   const f = lod === 0 ? b.fp : (b.corr && b.corr.footprint_wgs84 ? b.fp : (b.lod || b.fp));

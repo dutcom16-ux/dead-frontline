@@ -3,10 +3,13 @@
 import { clamp, lerp } from "../core";
 
 export class IsoCamera {
+  /** heading the camera starts at and turns from in 90° steps: lined up with the town's street grid,
+   *  which the pre-rendered buildings are drawn for (set when the map loads) */
+  static gridYaw = Math.PI / 4;
   x = 0; y = 0; z = 0;          // smoothed target (map metres)
   tx = 0; ty = 0;               // desired target
   zoom = 70; tzoom = 70;        // half height of the view in metres
-  yaw = Math.PI / 4; tyaw = Math.PI / 4;
+  yaw = IsoCamera.gridYaw; tyaw = IsoCamera.gridYaw;
   pitch = 0.87;                 // ~50° down: readable streets and building sides
   minZoom = 10; maxZoom = 900;
   bounds: [number, number, number, number];
@@ -33,6 +36,8 @@ export class IsoCamera {
     this.clampTarget();
   }
   rotate(steps: number) { this.tyaw += steps * Math.PI / 2; }
+  /** the nearest heading on the street grid (old saves, free turns) */
+  snapYaw(y: number) { const g = IsoCamera.gridYaw, q = Math.PI / 2; return g + Math.round((y - g) / q) * q; }
   zoomBy(f: number) { this.tzoom = clamp(this.tzoom * f, this.minZoom, this.maxZoom); }
   lookAt(x: number, y: number, zoom?: number) { this.tx = x; this.ty = y; if (zoom) this.tzoom = zoom; this.clampTarget(); }
   snap() { this.x = this.tx; this.y = this.ty; this.zoom = this.tzoom; this.yaw = this.tyaw; }

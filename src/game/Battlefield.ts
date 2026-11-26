@@ -9,6 +9,8 @@ import { MapData, PackageSource, loadPackedPackage } from "../engine/mapdata.js"
 // @ts-ignore
 import { Physics } from "../engine/physics.js";
 import { dist } from "./core";
+import { TownSprites } from "./rendering/TownSprites";
+import { IsoCamera } from "./camera/IsoCamera";
 
 export interface Landmark { id: string; name: string; osm_name?: string; status: string; center: [number, number] | null; main_building: string | null; buildings: string[] }
 
@@ -113,6 +115,7 @@ export class Battlefield {
   bounds!: [number, number, number, number];
   playBounds!: [number, number, number, number];
   attribution = "";
+  town = new TownSprites();
   constructor(canvas: HTMLCanvasElement) { this.canvas = canvas; }
 
   async load(url: string, progress: (msg: string, f: number) => void) {
@@ -122,10 +125,15 @@ export class Battlefield {
     progress("Reading OpenStreetMap layers and building footprints", 0.65);
     await new Promise((r) => setTimeout(r, 0));
     this.map = await MapData.load(new PackageSource(pkg));
+    progress("Loading the town's buildings and trees", 0.7);
+    await this.town.load("sprites/town/");
+    this.town.apply(this.map);                    // sprite buildings take their footprints before the world is built
+    IsoCamera.gridYaw = this.town.gridYaw;
     progress("Preparing terrain, roads and coast", 0.75);
     await new Promise((r) => setTimeout(r, 0));
     this.world = new World(this.r, this.map);
     this.phys = new Physics(this.map, this.world);
+    this.town.attach(this);
     progress("Building the road network", 0.88);
     for (const l of this.map.manifest.landmarks || []) this.landmarks.set(l.id, l);
     this.bounds = this.map.bounds();

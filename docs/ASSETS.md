@@ -200,6 +200,42 @@ Buildings come from the Toledo map package. The engine's procedural Philippine a
 (`src/engine/archetypes.js`) generate them from footprint, storeys, roof type and materials. Facade
 and roof textures live in `src/engine/atlas.js`, which is a code-drawn texture atlas.
 
+## Pre-rendered town (`public/sprites/town/*`)
+
+Selected map buildings and all trees are pre-rendered sprites (`src/game/rendering/TownSprites.ts`):
+
+| Sprite | Replaces | Views × states | Size |
+|---|---|---|---|
+| Church (stone, bell tower, plaza) | the San Juan de Sahagun shrine (landmark) | 8 × intact/damaged/destroyed | nave walls 8.5 m, tower 20.6 m (×1.3 here) |
+| Hospital (4 storeys, helipad, emergency bay) | Toledo City General Hospital main block | 8 × 3 | 28 × 14 m, 18 m to the stair core |
+| School (3 storeys, 12 classrooms, yard) | school blocks that fit | 8 × 3 | 38 × 9.4 m, ridge 12.6 m |
+| Mid-rise (5 storeys, shops) | larger shop / government buildings that fit | 8 × 3 | 10 × 12 m, 17.6 m |
+| Townhouse (2 storeys, sari-sari store) | two-storey houses and shops that fit | 8 × 3 | 7 × 9 m, ridge 7.6 m |
+| Coconut palm, mango tree, banana plant | the 3D cone trees and palms | 2 × 4 sway frames | 11.5 m, 9 m, 4.3 m |
+
+* **Source.** `tools/town3d/` holds the models (signed-distance scenes, `church.py`, `school.py`,
+  `hospital.py`, `townhouse.py`, `midrise.py`, `trees.py`) and the renderer. `render_sheet.py <name>
+  <frame> <ax> <ay>` and `build_trees.py` render the frames at 17.3 px/m with the game's camera
+  (orthographic, 0.87 rad down, light from the screen's top-left); `game_town.py` packs them at half
+  resolution into 256-colour pages (1.6 MB in all) and writes `town.json`.
+* **Which buildings.** `game_town.py` matches sprites to map buildings by archetype, size and
+  orientation and checks each new lot (with its yard or forecourt) against other buildings and
+  roads; covered walkways under a forecourt are hidden. The sprites exist in 8 views, so the camera
+  turns in 90° steps from the town's street grid (`camera_yaw_deg`, 64°): wide buildings (school,
+  hospital) are only used on lots that face the grid, which keeps them in the three-quarter views.
+* **In the game.** A sprite building takes the sprite's footprint, height and door, so collision,
+  navigation, line of sight, cover and the minimap match the picture. It shows the intact frame,
+  the damaged one from a quarter of its structure lost, and the destroyed one from three quarters.
+  Sprites are drawn inside the 3D pass: each pixel's depth comes from the view ray hitting the
+  building's box (or the tree's) or else the ground, so 3D buildings and sprites hide each other
+  correctly. Trees sway at 4 fps with a random phase.
+* **Scale.** Soldiers and infected are drawn 1.45 m tall on screen (a 1.8 m man as the 50° camera
+  sees him, 1.1× life; brutes 1.45×). Far out they keep at least 12 px but never more than a
+  single-storey wall, so every house, wall and tree stands taller than them.
+* **Limits.** Pages are half resolution (8.65 px/m): sharp at the default zoom on a phone, soft
+  when zoomed right in. Sprite buildings have no interiors (units inside show through, faded).
+  Buildings that do not fit a sprite stay 3D.
+
 ## Audio (`src/game/audio/Sfx.ts`)
 
 All sounds are synthesised with WebAudio. To use recorded sounds, decode them into `AudioBuffer`s at
