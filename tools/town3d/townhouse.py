@@ -413,7 +413,7 @@ def shade(scene, P, ids, n):
             dn = Pm - pr.c
             streaky = noise(np.stack([dn @ pr.R[:, 0] * 0.6, dn[:, 1] * 0, dn @ pr.R[:, 2] * 4.0], 1), 1.0, 4)
             rust = np.clip(0.6 * noise(Pm, 3.2, 2) + 0.6 * streaky - 0.62 + 0.35 * wear, 0, 1)
-            if pr.mat == "roof_green":                                                   # painted sheets: faded, little rust
+            if pr.mat in ("roof_green", "roof_blue", "roof_grey"):                       # painted sheets: faded, little rust
                 rust *= 0.4
                 c *= (0.93 + 0.1 * streaky)[:, None]
             c = c * (1 - rust[:, None]) + np.array([0.47, 0.28, 0.16]) * rust[:, None]
@@ -459,6 +459,24 @@ def shade(scene, P, ids, n):
             c = np.where((ring | H)[:, None], np.array([0.93, 0.93, 0.9]), c)
             c = np.where(edge[:, None], np.array([0.95, 0.78, 0.15]), c)
             c = np.where(((r < 5.8) & ~ring & ~H & (r > 0))[:, None] & (wear > 0), c, c)
+        elif tex == "cladding":                                                          # ribbed metal wall sheets
+            thin = int(np.argmin(pr.h))
+            ua = 0 if thin == 2 else 2
+            ph = q[:, ua] * (2 * math.pi / 0.3)
+            face = np.abs(n[m] @ pr.R[:, thin]) > 0.5
+            n2[m] = n[m] + np.where(face[:, None], pr.R[:, ua][None] * (0.4 * np.cos(ph))[:, None], 0)
+            c *= (0.9 + 0.1 * np.cos(ph))[:, None]
+            dirt = np.clip(noise(np.stack([Pm[:, 0] * 2.0, Pm[:, 1] * 0.2, Pm[:, 2] * 2.0], 1), 1.0, 6), 0, 1)
+            c *= (1 - 0.12 * dirt)[:, None]
+            rust = np.clip(0.7 * noise(Pm, 2.5, 7) - 0.78 + 0.32 * wear, 0, 1)
+            c = c * (1 - rust[:, None]) + np.array([0.45, 0.28, 0.17]) * rust[:, None]
+        elif tex == "asphalt":
+            c *= (0.88 + 0.12 * noise(Pm, 6.0, 2) + 0.05 * hash01(Pm, 30.0))[:, None]
+            crack = np.abs(noise(Pm, 0.9, 8)) < 0.012
+            c *= np.where(crack, 0.6, 1.0)[:, None]
+        elif tex == "hazard":                                                            # yellow and black stripes
+            st = (((q[:, 0] + q[:, 1] + q[:, 2]) / 0.35) % 2.0) < 1.0
+            c = np.where(st[:, None], np.array([0.95, 0.75, 0.10]), np.array([0.10, 0.10, 0.10]))
         elif tex == "breeze":                                                            # ventilation blocks
             thin = int(np.argmin(pr.h))
             ua, va = [k for k in range(3) if k != thin]
@@ -587,7 +605,7 @@ def shade(scene, P, ids, n):
             k_ = np.clip(k_ * 1.6, 0, 0.92)
             c = c * (1 - k_[:, None]) + np.array([0.08, 0.07, 0.07]) * k_[:, None]
         # weathering and battle damage on walls and concrete
-        if wear and tex in ("plaster", "concrete", "rubble", "plain", "wood", "masonry", "tiles", "helipad", "hsign"):
+        if wear and tex in ("plaster", "concrete", "rubble", "plain", "wood", "masonry", "tiles", "helipad", "hsign", "cladding", "asphalt"):
             soot = np.clip(noise(Pm, 0.9, 3) * 1.3 - (1.05 - 0.4 * wear), 0, 1)
             c = c * (1 - 0.75 * soot[:, None]) + np.array([0.10, 0.09, 0.08]) * 0.75 * soot[:, None]
             if tex in ("plaster", "masonry"):

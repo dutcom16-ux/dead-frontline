@@ -13,13 +13,18 @@ type Frame = [number, number, number, number, number, number];        // x, y, w
 interface BDef { page: string; size: [number, number]; frames: Frame[][]; fp: number[]; ent: [number, number]; box: number[]; lot: number[]; lv: number; h: number; rh: number }
 interface TDef { views: [number, number, number, number, number, number, number][]; h: number; r: number }
 interface Placement { id: string; type: string; x: number; y: number; front: number; s: number; hide?: string[] }
+interface FxDef { page: string; ppm: number; frame: number[]; frames: number; fps: number; box: [number, number] }   // box: [metres toward the camera when hidden, height]
 interface TownData {
   ppm: number; camera_yaw_deg: number; winding: number;
   buildings: Record<string, BDef>; trees: { page: string; size: [number, number]; kinds: Record<string, TDef> };
   placements: Placement[];
+  /** fire and smoke loops, and each building's fire points: [kind, x, y, z (sprite metres), scale, phase,
+   *  bit mask of the views (bit v = view v) in which the building does not hide it, and for a fire on a
+   *  wall the yaw of the wall's outward normal (deg, sprite space) or null] */
+  fx?: { fire: FxDef; smoke: FxDef; emitters: Record<string, Record<"damaged" | "destroyed", [string, number, number, number, number, number, number, number | null][]>> };
 }
 interface Placed { b: any; def: BDef; type: string; x: number; y: number; z: number; lift: number; front: number; s: number; cf: number; sf: number }
-interface Batch { tex: any; ppm: number; slot: any; data: Float32Array; n: number }
+interface Batch { tex: any; ppm: number; slot: any; data: Float32Array; n: number; frames: number; fps: number; soft: boolean }
 
 const D2R = Math.PI / 180;
 const u = (c: number): [number, number] => [Math.sin(c * D2R), Math.cos(c * D2R)];
@@ -42,6 +47,7 @@ export class TownSprites {
       if (!r.ok) throw new Error("town.json: HTTP " + r.status);
       const d: TownData = await r.json();
       const pages = new Set<string>([d.trees.page, ...Object.values(d.buildings).map((b) => b.page)]);
+      if (d.fx) { pages.add(d.fx.fire.page); pages.add(d.fx.smoke.page); }
       await Promise.all([...pages].map((p) => new Promise<void>((res, rej) => {
         const i = new Image();
         i.onload = () => { this.imgs.set(p, i); res(); };
@@ -135,8 +141,9 @@ export class TownSprites {
     if (!d || !this.tex.size) return [];
     const out: any[] = [];
     const yawDeg = cam.yaw / D2R, [fx, fy] = cam.forward;
-    // ---- buildings: frame by damage, view by the camera's heading
+    // ---- buildings: frame by damage, view by the camera's heading; damaged and destroyed ones burn
     const byPage = new Map<string, { q: Placed; dep: number; st: number }[]>();
+    const burning: { q: Placed; st: number }[] = [];
     for (const q of this.placed) {
       if (Math.abs(q.x - cam.x) > radius + 60 || Math.abs(q.y - cam.y) > radius + 60 || q.b.removed) continue;
       const dmg = q.b.rs?.dmg || 0;
@@ -144,6 +151,7 @@ export class TownSprites {
       const l = byPage.get(q.def.page) || [];
       l.push({ q, dep: q.x * fx + q.y * fy, st });
       byPage.set(q.def.page, l);
+      if (st > 0) burning.push({ q, st });
     }
     for (const [page, l] of byPage) {
       l.sort((a, b) => b.dep - a.dep);
@@ -155,6 +163,7 @@ export class TownSprites {
       });
       out.push(this.batch("b:" + page, page, data, l.length));
     }
+    if (d.fx) out.push(...this.fires(burning, cam, yawDeg));
     // ---- trees (rebuilt when the camera moves, zooms or turns)
     const key = [Math.round(cam.x / 12), Math.round(cam.y / 12), Math.round(radius / 20), Math.round(yawDeg / 5)].join(",");
     const tb = this.batches.get("trees");
@@ -174,15 +183,76 @@ export class TownSprites {
         const s = Math.max(0.85, t.s) * (kind === "banana" ? 1.1 : 1);
         data.set([t.x, t.z, -t.y, s, v[0], v[1], v[2], v[3], v[5], v[6], 1, 0, -k.r, k.r, -k.r, k.r, k.h, v[4], hash(t.x, t.y, 3) * 4, 0.6], i * 20);
       });
-      this.batch("trees", d.trees.page, data, list.length);
+      this.batch("trees", d.trees.page, data, list.length, { frames: 4, fps: 4 });
     }
     out.push(this.batches.get("trees"));
     return out;
   }
 
-  private batch(key: string, page: string, data: Float32Array, n: number): Batch {
+  /** fire and smoke over the burning buildings, back to front */
+  /** fire and smoke over the burning buildings, back to front. Where the building hides a fire in
+   *  this view (worked out from the model), it stands on a plane facing the camera at the fire, so
+   *  the building covers the flames and only the smoke above the roof shows. Where it does not, its
+   *  depth is brought in front of the building's depth box: for a fire on a wall, a slab parallel to
+   *  the wall just outside the box (the flames lick up the facade); for one on a roof or in the
+   *  rubble, a plane facing the camera, far enough forward for the whole flame or plume. */
+  private fires(burning: { q: Placed; st: number }[], cam: IsoCamera, yawDeg: number): Batch[] {
+    const F = this.data!.fx!, lists: Record<string, { dep: number; v: number[] }[]> = { fire: [], smoke: [] };
+    const [fx, fy] = cam.forward, cp = Math.cos(cam.pitch), sp = Math.sin(cam.pitch);
+    for (const { q, st } of burning) {
+      const em = F.emitters[q.type]?.[st === 1 ? "damaged" : "destroyed"];
+      if (!em) continue;
+      const X = u(q.front - 90), Z = u(q.front);
+      const view = ((Math.round((q.front - yawDeg) / 45) % 8) + 8) % 8;
+      // the way to the camera in the building's own frame
+      const dir = [-(fx * X[0] + fy * X[1]) * cp, sp, -(fx * Z[0] + fy * Z[1]) * cp];
+      const b = q.def.box, lo = [b[0], q.lift, b[2]], hi = [b[1], b[4], b[3]];
+      for (const [kind, lx, ly, lz, sc, ph, mask, wall] of em) {
+        const D = (F as any)[kind] as FxDef;
+        if (!D) continue;
+        const x = q.x + q.s * (lx * X[0] + lz * Z[0]), y = q.y + q.s * (lx * X[1] + lz * Z[1]);
+        const [near, top] = D.box, f = D.frame, k = sc * q.s, smoke = kind === "smoke";
+        let rot = [1, 0], box = [0, 0, near / k, 0];             // hidden: a plane facing the camera at the fire
+        if ((mask >> view) & 1) {
+          const e = [lx, ly, lz];
+          if (wall !== null && wall !== undefined) {
+            // a slab parallel to the wall, just outside the building's depth box
+            const nx = Math.round(Math.sin(wall * D2R)), nz = Math.round(Math.cos(wall * D2R));
+            const gap = nx > 0 ? hi[0] - lx : nx < 0 ? lx - lo[0] : nz > 0 ? hi[2] - lz : lz - lo[2];
+            const wx = nx * X[0] + nz * Z[0], wy = nx * X[1] + nz * Z[1], c = Math.atan2(wx, wy);
+            const z0 = (Math.max(0, gap) * q.s + 0.25) / k, half = smoke ? 6.0 : 1.5;
+            rot = [Math.cos(c), Math.sin(c)];
+            box = [-half, half, z0, z0 + 1.0 / k];
+          } else {
+            let tf = Infinity;
+            for (let a = 0; a < 3; a++) {
+              if (Math.abs(dir[a]) < 1e-6) continue;
+              const t0 = (lo[a] - e[a]) / dir[a], t1 = (hi[a] - e[a]) / dir[a];
+              tf = Math.min(tf, Math.max(t0, t1));
+            }
+            const tall = (smoke ? 8.0 : 4.6) * k * 1.25;         // the whole flame or plume clears the box
+            box = [0, 0, ((isFinite(tf) ? Math.max(0, tf) * q.s : 0) + 0.4 + tall) / k, 0];
+          }
+        }
+        lists[kind].push({ dep: x * fx + y * fy, v: [x, q.z + q.s * ly, -y, k, f[0], f[1], f[2], f[3], f[5], f[6], rot[0], rot[1], ...box, top, f[4], ph, -1] });
+      }
+    }
+    const out: Batch[] = [];
+    for (const kind of ["fire", "smoke"]) {
+      const l = lists[kind].sort((a, b) => b.dep - a.dep), D = (F as any)[kind] as FxDef;
+      const data = new Float32Array(l.length * 20);
+      l.forEach((e, i) => data.set(e.v, i * 20));
+      out.push(this.batch("fx:" + kind, D.page, data, l.length, { frames: D.frames, fps: D.fps, soft: true, ppm: D.ppm }));
+    }
+    return out;
+  }
+
+  private batch(key: string, page: string, data: Float32Array, n: number, o: { frames?: number; fps?: number; soft?: boolean; ppm?: number } = {}): Batch {
     let b = this.batches.get(key);
-    if (!b) { b = { tex: this.tex.get(page), ppm: this.data!.ppm, slot: null, data, n }; this.batches.set(key, b); }
+    if (!b) {
+      b = { tex: this.tex.get(page), ppm: o.ppm ?? this.data!.ppm, slot: null, data, n, frames: o.frames ?? 1, fps: o.fps ?? 0, soft: !!o.soft };
+      this.batches.set(key, b);
+    }
     b.data = data; b.n = n;
     b.slot = this.r.spriteBatch(b.slot, data, n);
     return b;
