@@ -43,10 +43,11 @@ const STRIDE = [1, 2, 3, 4, 3, 2];
 /** rifle direction on screen for each view (x right, y down); S points at the viewer, N away */
 const RIFLE: Record<Dir8, [number, number]> = { N: [0, -1], NE: [0.6, -0.8], E: [1, 0], SE: [0.97, 0.25], S: [0, 1], SW: [-0.94, 0.34], W: [-1, 0], NW: [-0.6, -0.8] };
 /** on-screen height of a standing figure in metres: a 1.8 m man as the 50° camera sees him, a touch
- *  larger than life (1.1x), so every house, wall and tree stands taller than the soldiers and infected */
+ *  larger than life. The town's buildings are drawn 1.3x their models (taller storeys and doors), so
+ *  the soldiers and infected stand in proportion: four-fifths of a door, three-fifths of a storey */
 const HUMAN_M = 1.45;
 /** far out, figures keep at least MIN_PX, but never more than a single-storey wall (FLOOR_M) */
-const MIN_PX = 12, FLOOR_M = 1.85;
+const MIN_PX = 12, FLOOR_M = 2.4;
 const TINTS: Record<string, string> = { bloater: "rgba(150,175,40,0.42)", brute: "rgba(30,18,12,0.38)", screamer: "rgba(235,215,225,0.30)", mutant: "rgba(150,25,20,0.36)" };
 const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 /** dying frames per second; shot frame and recoil frame lengths (s); aim kept after a target drops (s) */

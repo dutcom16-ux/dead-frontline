@@ -12,7 +12,7 @@ import type { Battlefield } from "../Battlefield";
 import type { IsoCamera } from "../camera/IsoCamera";
 
 type Frame = [number, number, number, number, number, number];        // x, y, w, h, anchor x, anchor y
-interface BDef { page: string; size: [number, number]; frames: Frame[][]; fp: number[]; ent: [number, number]; box: number[]; lot: number[]; lv: number; h: number; rh: number; parts?: number[][] }
+interface BDef { page: string; size: [number, number]; ppm?: number; frames: Frame[][]; fp: number[]; ent: [number, number]; box: number[]; lot: number[]; lv: number; h: number; rh: number; parts?: number[][] }
 interface TDef { views: [number, number, number, number, number, number, number][]; h: number; r: number }
 interface Placement { id: string; type: string; x: number; y: number; front: number; s: number; hide?: string[]; enter?: number; lm?: string }
 interface FxDef { page: string; ppm: number; frame: number[]; frames: number; fps: number; box: [number, number] }   // box: [metres toward the camera when hidden, height]
@@ -209,7 +209,7 @@ export class TownSprites {
         const f = q.def.frames[st][view], bx = q.def.box, o = i * 20;
         data.set([q.x, q.z, -q.y, q.s, f[0], f[1], f[2], f[3], f[4], f[5], q.cf, q.sf, bx[0], bx[1], bx[2], bx[3], bx[4], 0, 0, q.lift], o);
       });
-      out.push(this.batch("b:" + page, page, data, l.length));
+      out.push(this.batch("b:" + page, page, data, l.length, { ppm: l[0].q.def.ppm }));
     }
     if (d.fx) out.push(...this.fires(burning, cam, yawDeg));
     // ---- trees (rebuilt when the camera moves, zooms or turns)
@@ -237,7 +237,6 @@ export class TownSprites {
     return out;
   }
 
-  /** fire and smoke over the burning buildings, back to front */
   /** fire and smoke over the burning buildings, back to front. Where the building hides a fire in
    *  this view (worked out from the model), it stands on a plane facing the camera at the fire, so
    *  the building covers the flames and only the smoke above the roof shows. Where it does not, its

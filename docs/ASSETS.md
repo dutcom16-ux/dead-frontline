@@ -207,16 +207,16 @@ code-drawn facade and roof textures (`src/engine/atlas.js`) are still there for 
 
 Every building and tree is a pre-rendered sprite (`src/game/rendering/TownSprites.ts`).
 
-| Sprite | Placed (4,233 in all) | Views × states | Size |
+| Sprite | Placed (3,059 in all) | Views × states | Size (model; drawn 1.25–1.5×, see Scale) |
 |---|---|---|---|
-| Church (stone, bell tower, plaza) | the San Juan de Sahagun shrine (landmark) | 8 × intact/damaged/destroyed | nave walls 8.5 m, tower 20.6 m (×1.3 here) |
+| Church (stone, bell tower, plaza) | the San Juan de Sahagun shrine (landmark) | 8 × intact/damaged/destroyed | nave walls 8.5 m, tower 20.6 m (×1.4 here: 29 m) |
 | Hospital (4 storeys, helipad, emergency bay) | Toledo City General Hospital (landmark) | 8 × 3 | 28 × 14 m, 18 m to the stair core |
-| School (3 storeys, 12 classrooms, yard) | Consolatrix College, UV Toledo and every other school site (17) | 8 × 3 | 38 × 9.4 m, ridge 12.6 m |
+| School (3 storeys, 12 classrooms, yard) | Consolatrix College, UV Toledo and every other school site (15) | 8 × 3 | 38 × 9.4 m, ridge 12.6 m |
 | Supermarket (hall, canopy, car park) | the public market (landmark) and the large commercial areas and malls (5) | 8 × 3 | 24 × 15 m hall, 29 m lot |
 | Power plant (turbine hall, boiler house, 30 m chimney, tanks, cooling tower, switchyard) | the Toledo Power Company (landmark) | 8 × 3 | 33 × 28 m yard, boiler house 21.6 m |
-| Mid-rise (5 storeys, shops) | the city hall (landmark, ×1.2) and shop blocks in the centre and on the main roads (93) | 8 × 3 | 10 × 12 m, 17.6 m |
-| Townhouse (2 storeys, sari-sari store) | houses and shops along the streets (2,261) | 8 × 3 | 7 × 9 m, ridge 7.6 m |
-| Bungalow (1 storey, porch, carport, fenced lot) | houses along the streets and on back lots (1,854) | 8 × 3 | 11 × 6.4 m, lot 16 × 12 m |
+| Mid-rise (5 storeys, shops) | the city hall (landmark, ×1.4) and shop blocks in the centre and on the main roads (56) | 8 × 3 | 10 × 12 m, 17.6 m (23 m drawn) |
+| Townhouse (2 storeys, sari-sari store) | houses and shops along the streets (1,790) | 8 × 3 | 7 × 9 m, ridge 7.6 m (9.9 m drawn) |
+| Bungalow (1 storey, porch, carport, fenced lot) | houses along the streets and on back lots (1,190) | 8 × 3 | 11 × 6.4 m, lot 16 × 12 m |
 | Coconut palm, mango tree, banana plant | the 3D cone trees and palms | 2 × 4 sway frames | 11.5 m, 9 m, 4.3 m |
 | Fire, smoke | burning damaged and destroyed sprite buildings | 12- and 24-frame loops | 4.6 m flames, 13 m plume |
 
@@ -224,8 +224,8 @@ Every building and tree is a pre-rendered sprite (`src/game/rendering/TownSprite
   `hospital.py`, `townhouse.py`, `midrise.py`, `bungalow.py`, `supermarket.py`, `powerplant.py`,
   `trees.py`) and the renderer. `render_sheet.py <name>
   <frame> <ax> <ay>` and `build_trees.py` render the frames at 17.3 px/m with the game's camera
-  (orthographic, 0.87 rad down, light from the screen's top-left); `game_town.py` packs them at half
-  resolution into 256-colour pages (2.6 MB in all), adds the fire and smoke loops (0.2 MB) and writes `town.json`.
+  (orthographic, 0.87 rad down, light from the screen's top-left); `game_town.py` packs them into
+  256-colour pages (3/4 resolution for the houses and shop blocks, half for the rest; 3 MB in all), adds the fire and smoke loops (0.2 MB) and writes `town.json`.
 * **The layout** (`layout.py`, run by `game_town.py`). First the landmarks at their OSM points
   (searching outward for a lot that fits), school blocks on every school and campus site and a
   supermarket on every large commercial area or mall. Then the street front: along every street,
@@ -235,8 +235,9 @@ Every building and tree is a pre-rendered sprite (`src/game/rendering/TownSprite
   houses along country roads. In the town, up to two rows of back lots go behind the street front.
   Every lot, with its yard, forecourt or car park, must be on land, off the water and every road,
   clear of the other lots, on ground no steeper than 3 m across, and outside the landing zone, the
-  port and plaza centres, parks, pitches, school and hospital grounds and cemeteries (open ground
-  for fighting and the FOB). The sprites exist in 8 views, so a building faces the street grid
+  port apron, the city plaza and the streets round it (45 m), the mission's checkpoint junctions
+  and the market's nest (20–35 m), parks, pitches, school and hospital grounds and cemeteries (open
+  ground for fighting and the FOB). The sprites exist in 8 views, so a building faces the street grid
   (`camera_yaw_deg` 64° = grid 19° + 45°) in 45° steps (wide school, hospital, supermarket and power
   plant in 90° steps, which keeps them in the three-quarter views), used where the street turns
   that way within 14°. Seeded, so the town is the same on every build. Churches, the hospital,
@@ -258,10 +259,14 @@ Every building and tree is a pre-rendered sprite (`src/game/rendering/TownSprite
   smoke above the roof shows; where it does not, its depth is brought in front of the building's
   depth box (a slab along the wall for wall fires). Each fire has its own animation phase.
 * **Scale.** Soldiers and infected are drawn 1.45 m tall on screen (a 1.8 m man as the 50° camera
-  sees him, 1.1× life; brutes 1.45×). Far out they keep at least 12 px but never more than a
-  single-storey wall, so every house, wall and tree stands taller than them.
-* **Limits.** Pages are half resolution (8.65 px/m): sharp at the default zoom on a phone, soft
-  when zoomed right in. Sprite buildings have no interiors (units inside show through, faded).
+  sees him, a touch over life; brutes 1.45×). The buildings are drawn larger than their models to
+  match (`layout.SIZE`): houses, shop blocks and the hospital 1.3×, schools, supermarkets and the
+  power plant 1.25×, the church 1.4× (1.5 where it fits). Storeys are about 3.9 m and doors 2.7 m on
+  that scale, so a soldier reaches four-fifths of a door and three-fifths of a storey, as in life.
+  Collision, line of sight and the footprints scale with the picture. Far out, figures keep at least
+  12 px but never more than a single-storey wall.
+* **Limits.** Pages are 13 px/m for the houses and shop blocks and 8.65 px/m for the rest: sharp at
+  the default zoom on a phone, soft when zoomed right in. Sprite buildings have no interiors (units inside show through, faded).
 
 ## Audio (`src/game/audio/Sfx.ts`)
 

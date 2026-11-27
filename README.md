@@ -4,13 +4,13 @@ A browser-based 2.5D isometric real-time strategy game. A military task force re
 Philippines from a zombie outbreak, one city at a time. The first battlefield is the **real street
 plan of Toledo City, Cebu**: OpenStreetMap roads, coastline and landmarks, built up with a
 pre-rendered town: the church, hospital, schools, market and power plant at their real places and
-some 4,200 houses, shops and schools along the streets.
+some 3,000 houses, shops and schools along the streets.
 
 **Map in use:** `public/maps/toledo_poblacion.mapz` is the package taken from the single-file
 Toledo map you built (`toledo_poblacion.html`), with its own buildings removed (the 422 OSM buildings
 it had are gone; 542 roads, 11 landmarks, no corrections). The town on it is laid out by
-`tools/town3d/layout.py` and drawn from pre-rendered sprites (`public/sprites/town/town.json`, 4,233
-buildings): the Sahagun church, the General Hospital, school blocks at Consolatrix College, UV Toledo
+`tools/town3d/layout.py` and drawn from pre-rendered sprites (`public/sprites/town/town.json`, 3,059
+buildings, drawn 1.25–1.5× their models so the soldiers and infected stand in proportion): the Sahagun church, the General Hospital, school blocks at Consolatrix College, UV Toledo
 and every other school site, the supermarket at the public market (and at the malls), the Toledo
 Power Company plant and a five-storey block at the city hall; then two-storey houses, bungalows and
 five-storey shop blocks along every street, shops in the centre and on the main roads, homes in the
@@ -96,7 +96,7 @@ from the pause menu, reload the page and load the slot. A scripted commander (`t
 the long middle of the mission through the same order and logistics calls the UI uses. The
 simulation is seeded and stepped by the test (`?manualtick`), so runs repeat exactly.
 
-Results on the current map (your `toledo_poblacion.html` package with the generated town of 4,233
+Results on the current map (your `toledo_poblacion.html` package with the generated town of 3,059
 pre-rendered buildings):
 
 | Run | Result |
