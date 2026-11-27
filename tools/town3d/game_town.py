@@ -3,7 +3,7 @@
     cd tools/town3d && python3 game_town.py        (frames from render_sheet.py / build_trees.py)
 
 1. Packs the pre-rendered buildings (townhouse, bungalow, mid-rise, church, school, hospital,
-   supermarket, power plant: 3 states x 8 views) and trees (coconut palm, mango, banana: 2 views x 4 sway frames) at half resolution,
+   supermarket, power plant: 3 states x 8 views) and trees (coconut palm, mango, banana: 2 views x 4 sway frames) at half resolution (houses and shop blocks at 3/4: they are seen most),
    trimmed, into one 256-colour atlas page per kind; and the fire and smoke loops (fx.py) with
    every building's fire points (burn.py) for its damaged and destroyed states.
 2. Lays out the town (layout.py): the map package has no buildings, so every building is a sprite
@@ -33,6 +33,8 @@ OUT = os.path.join(ROOT, "public/sprites/town")
 SRC_PPM = 320 / 18.5          # px per metre of the renders
 SCALE = 0.5                   # atlas resolution relative to the renders
 PPM = SRC_PPM * SCALE
+# the houses and shops are seen most and drawn 1.3x (layout.SIZE): their pages are sharper
+RES = {"townhouse": 0.75, "bungalow": 0.75, "midrise": 0.7}
 
 # fp: footprint polygon (x, z pairs), ent: [edge index, t] (the door), box: x0, x1, z0, z1, top (depth
 # proxy), lot: x0, x1, z0, z1 (everything the sprite paints on the ground), long: the long axis
@@ -132,17 +134,17 @@ def save_page(items, name):
 def pack_buildings():
     meta = {}
     for name, B in BUILDINGS.items():
-        ims, info = [], []
+        ims, info, k = [], [], RES.get(name, SCALE)
         for st in range(3):
             for v in range(8):
-                im = premul_resize(Image.open(os.path.join(HERE, B["src"], "frames", f"{st}_{v}.png")), SCALE)
+                im = premul_resize(Image.open(os.path.join(HERE, B["src"], "frames", f"{st}_{v}.png")), k)
                 x0, y0, x1, y1 = bbox(im)
                 ims.append(im.crop((x0, y0, x1, y1)))
-                ax, ay = B["pivot"][0] * B["F"] * SCALE - x0, B["pivot"][1] * B["F"] * SCALE - y0
+                ax, ay = B["pivot"][0] * B["F"] * k - x0, B["pivot"][1] * B["F"] * k - y0
                 info.append([round(ax, 2), round(ay, 2)])
         pos, size = save_page(ims, name)
         frames = [[[*pos[st * 8 + v], ims[st * 8 + v].width, ims[st * 8 + v].height, *info[st * 8 + v]] for v in range(8)] for st in range(3)]
-        meta[name] = {"page": name + ".png", "size": size, "frames": frames, "fp": [round(v, 2) for v in B["fp"]], "ent": B["ent"],
+        meta[name] = {"page": name + ".png", "size": size, "ppm": round(SRC_PPM * k, 4), "frames": frames, "fp": [round(v, 2) for v in B["fp"]], "ent": B["ent"],
                       "box": B["box"], "lot": B["lot"], "lv": B["lv"], "h": B["h"], "rh": B["rh"], **({"parts": B["parts"]} if "parts" in B else {})}
         print(f"  {name}: page {size[0]}x{size[1]}, {os.path.getsize(os.path.join(OUT, name + '.png')) // 1024} KB")
     return meta

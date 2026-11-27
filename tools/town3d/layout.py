@@ -31,6 +31,15 @@ DIAG = {"school", "hospital", "supermarket", "powerplant"}
 STREETS = ["trunk", "trunk_link", "primary", "secondary", "secondary_link", "tertiary", "unclassified", "residential", "living_street"]
 NOGO_AREAS = {"pitch", "grass", "site", "paved", "cemetery", "bridge"}
 LZ = (2321.0, -190.0)
+OPEN = [(2378.0, 205.0, 30.0),            # checkpoint Alpha, Naga-Toledo Road
+        (1431.5, 1212.1, 30.0),           # checkpoint Bravo, Naga-Toledo Road / Antonio Y. de Pio Highway
+        (-192.6, 6.1, 35.0),              # checkpoint Charlie, Diosdado Macapagal Highway / Rafols Street
+        (-117.3, 133.3, 20.0)]            # the market's nest
+# every building is drawn larger than its model: taller storeys and doors, so that the soldiers and
+# infected (drawn 1.45 m tall, a touch over life size for the 50 deg camera) stand in proportion to
+# them: a figure reaches four-fifths of a door and three-fifths of a storey
+SIZE = {"townhouse": 1.3, "bungalow": 1.3, "midrise": 1.3, "school": 1.25, "supermarket": 1.25, "powerplant": 1.25,
+        "hospital": 1.3, "church": 1.5}
 ARCH = {"townhouse": ("concrete_house_2f", "residential"), "bungalow": ("concrete_house_1f", "residential"),
         "midrise": ("shop_commercial", "commercial"), "supermarket": ("shop_commercial", "commercial"),
         "school": ("school_block", "school"), "hospital": ("hospital_block", "hospital"), "church": ("church", "church"),
@@ -176,7 +185,10 @@ def town_layout(B, grid_deg, seed=2026):
     lots = Lots()
     out = []
     marks = {l["id"]: l["center"] for l in G.man["landmarks"] if l.get("center")}
-    reserved = [(LZ[0], LZ[1], 75.0)] + [(c[0], c[1], 22.0) for k, c in marks.items() if k in ("city_plaza", "toledo_port")]
+    # open ground: the landing zone, the port apron, and the city plaza with the streets round it
+    # (the final fight: the nest and the Abomination are on the plaza)
+    reserved = [(LZ[0], LZ[1], 75.0)] + [(c[0], c[1], {"city_plaza": 45.0, "toledo_port": 22.0}[k]) for k, c in marks.items()
+                                          if k in ("city_plaza", "toledo_port")]
 
     def allowed(t):
         per = 90 if t in DIAG else 45
@@ -247,28 +259,32 @@ def town_layout(B, grid_deg, seed=2026):
         d = np.hypot(rd[:, 0] - x, rd[:, 1] - y)
         return rd[np.argmin(d)]
 
-    def landmark(t, key, n=1, radius=70, s=1.0):
+    def landmark(t, key, n=1, radius=70, s=None):
+        s = s or SIZE[t]
         c = marks[key]
         placed = 0
         r0 = nearest_road(*c)
         face = math.degrees(math.atan2(r0[0] - c[0], r0[1] - c[1])) if r0 is not None else grid_deg
         fronts = sorted({snap(t, face + k * allowed(t))[0] for k in range(int(360 / allowed(t)))},
                         key=lambda f: abs(((f - face) + 180) % 360 - 180))
-        for rad in np.arange(0, radius, 3.0):
-            for a in (np.linspace(0, 360, max(1, int(rad / 3) * 2 + 1), endpoint=False) if rad else [0]):
-                p = np.array(c) + rad * u(a)
-                for f in fronts[:2]:
-                    if place(t, p, f, s, {"lm": key} if placed == 0 else None, NOGO_AREAS - {"site", "paved"}):
-                        placed += 1
-                        if placed >= n:
-                            return placed
-                        break
+        for sc in (s, s * 0.93, s * 0.87):                    # a little smaller where the full size does not fit
+            for rad in np.arange(0, radius, 3.0):
+                for a in (np.linspace(0, 360, max(1, int(rad / 3) * 2 + 1), endpoint=False) if rad else [0]):
+                    p = np.array(c) + rad * u(a)
+                    for f in fronts[:2]:
+                        if place(t, p, f, round(sc, 3), {"lm": key} if placed == 0 else None, NOGO_AREAS - {"site", "paved"}):
+                            placed += 1
+                            if placed >= n:
+                                return placed
+                            break
+            if placed:
+                return placed
         return placed
 
-    for (t, key, kw) in (("church", "sahagun_church", dict(s=1.3)), ("hospital", "general_hospital", dict(s=1.15)),
+    for (t, key, kw) in (("church", "sahagun_church", dict()), ("hospital", "general_hospital", dict()),
                          ("school", "consolatrix", dict(n=2)), ("school", "uv_toledo", dict(n=2)),
                          ("supermarket", "public_market", dict(radius=120)), ("powerplant", "tpc", dict(radius=150)),
-                         ("midrise", "city_hall", dict(n=2, s=1.2))):
+                         ("midrise", "city_hall", dict(n=2, s=1.4))):
         if key in marks:
             landmark(t, key, **kw)
     # school blocks on every school and campus site; a supermarket on every large commercial area
@@ -291,6 +307,10 @@ def town_layout(B, grid_deg, seed=2026):
         if str(e.get("lm", "")).startswith("_"):
             del e["lm"]
     print(f"  landmarks and sites: {len(out)} buildings")
+    # room to fight at the mission's checkpoints (op01: road junctions) and round the market's nest:
+    # no houses within these circles (the landmarks above stand already)
+    for (x, y, r) in OPEN:
+        reserved.append((x, y, r))
 
     # ---------------------------------------------------------------- 2. street frontage
     core = np.array(marks.get("city_plaza", (0, 0)))
@@ -345,14 +365,12 @@ def town_layout(B, grid_deg, seed=2026):
                     front, err = snap(t, face)
                     if abs(err) > 14:
                         continue
-                    D = B[t]
-                    lot = D["lot"]
+                    lot = [v * SIZE[t] for v in B[t]["lot"]]                  # the lot as drawn (scaled)
                     half = (lot[1] - lot[0]) / 2
                     setback = rng.uniform(0.8, 2.2) + half * abs(math.sin(math.radians(err)))
                     # the pivot sits behind the lot's front edge, facing the street
-                    piv = P + n * (hw + setback + lot[3]) + dvec * (half + (lot[0] + lot[1]) / 2) * 0
-                    piv = piv - u(front - 90) * ((lot[0] + lot[1]) / 2)
-                    if place(t, piv, front):
+                    piv = P + n * (hw + setback + lot[3]) - u(front - 90) * ((lot[0] + lot[1]) / 2)
+                    if place(t, piv, front, SIZE[t]):
                         free[side] = s_ + (lot[1] - lot[0]) + gap
                         if t == "supermarket":
                             supermarkets += 1
@@ -373,11 +391,11 @@ def town_layout(B, grid_deg, seed=2026):
             if rng.uniform() < (0.2 if depth == 1 else 0.45):
                 continue
             t2 = "bungalow" if rng.uniform() < 0.55 else "townhouse"
-            lot2 = B[t2]["lot"]
+            lot2 = [v * SIZE[t2] for v in B[t2]["lot"]]
             for jit in (0.0, rng.uniform(-3, 3)):
                 back = piv - u(front) * (rng.uniform(1.2, 3.5) - lot[2] + lot2[3]) \
                     + u(front - 90) * ((lot[0] + lot[1]) / 2 - (lot2[0] + lot2[1]) / 2 + jit)
-                if place(t2, back, front):
+                if place(t2, back, front, SIZE[t2]):
                     nxt.append((t2, back, front, lot2))
                     break
         print(f"  infill row {depth}: {len(nxt)} buildings")
