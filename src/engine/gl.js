@@ -205,22 +205,22 @@ void main(){ vec3 d = normalize(v_dir); float t = clamp(d.y * 2.2, 0.0, 1.0);
 // quad around its map pivot, drawn at the sprite's own pixel scale; its depth comes per pixel from the
 // view ray hitting the object's box (building volume / tree) or else the ground, so sprites and the
 // 3D world hide each other correctly. Pass 0 draws the solid pixels (depth written), pass 1 the soft
-// ones (shadows, edges) over them without writing depth.
+// ones (shadows, edges) over them without writing depth; pass 2 the soft batches (fire, smoke).
 const SPR_VS = `#version 300 es
 layout(location=0) in vec4 i_piv;   // pivot x, height, z (GL), scale
 layout(location=1) in vec4 i_frm;   // frame x, y, w, h in atlas px
 layout(location=2) in vec4 i_anc;   // anchor x, y in the frame, cos(front), sin(front)
-layout(location=3) in vec4 i_box;   // box x0, x1, z0, z1 in sprite metres
+layout(location=3) in vec4 i_box;   // box x0, x1, z0, z1 in sprite metres; x0 = x1: a billboard, z0 metres toward the camera
 layout(location=4) in vec4 i_ext;   // box top, animation stride (px, 0 = still), phase, ground lift (sprite m)
 uniform mat4 u_vp;
 uniform vec2 u_vpx, u_tex;
-uniform float u_k, u_time;
+uniform float u_k, u_time, u_frames, u_fps;
 out vec2 v_uv; out vec2 v_ndc;
 flat out vec4 v_piv; flat out vec4 v_box; flat out vec4 v_rot;
 void main(){
   int c = gl_VertexID;
   vec2 q = vec2((c == 1 || c == 2 || c == 4) ? 1.0 : 0.0, (c == 2 || c == 4 || c == 5) ? 1.0 : 0.0);
-  float col = i_ext.y > 0.0 ? mod(floor(u_time * 4.0 + i_ext.z), 4.0) : 0.0;
+  float col = i_ext.y > 0.0 ? mod(floor(u_time * u_fps + i_ext.z), u_frames) : 0.0;
   vec2 fpx = q * i_frm.zw;
   vec2 off = (fpx - i_anc.xy) * u_k * i_piv.w;
   vec4 pc = u_vp * vec4(i_piv.xyz, 1.0);
@@ -241,7 +241,7 @@ flat in vec4 v_piv; flat in vec4 v_box; flat in vec4 v_rot;
 out vec4 o;
 void main(){
   vec4 t = texture(u_img, v_uv);
-  if (t.a < 0.004 || (u_pass < 0.5 ? t.a < 0.5 : t.a >= 0.5)) discard;
+  if (t.a < 0.004 || (u_pass < 0.5 ? t.a < 0.5 : u_pass < 1.5 && t.a >= 0.5)) discard;
   vec4 a = u_ivp * vec4(v_ndc, -1.0, 1.0), b = u_ivp * vec4(v_ndc, 1.0, 1.0);
   vec3 ro = a.xyz / a.w, rd = normalize(b.xyz / b.w - ro);
   // sprite space: x = width, y = up, z = the front; metres before scaling
@@ -252,8 +252,10 @@ void main(){
   vec3 t0 = (vec3(v_box.x, v_rot.w, v_box.z) - lo) * inv, t1 = (vec3(v_box.y, v_rot.z, v_box.w) - lo) * inv;
   vec3 tn = min(t0, t1), tf = max(t0, t1);
   float tin = max(max(tn.x, tn.y), tn.z), tout = min(min(tf.x, tf.y), tf.z);
-  // the box, else the ground: lifted to the highest terrain under the sprite, so a slope never hides it
-  float th = (tin <= tout && tout > 0.0) ? tin : (v_rot.w - lo.y) / ld.y;
+  // the box, else the ground: lifted to the highest terrain under the sprite, so a slope never hides it;
+  // fire and smoke stand on a plane facing the camera, a little in front of their source
+  float th = v_box.x == v_box.y ? dot(v_piv.xyz - ro, rd) / v_piv.w - v_box.z
+           : (tin <= tout && tout > 0.0) ? tin : (v_rot.w - lo.y) / ld.y;
   vec3 hit = ro + rd * (th * v_piv.w);
   vec4 cp = u_vp * vec4(hit, 1.0);
   gl_FragDepth = clamp(cp.z / cp.w * 0.5 + 0.5, 0.0, 1.0);
@@ -579,14 +581,16 @@ export class Renderer {
       gl.enable(gl.BLEND);
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       const devPpm = this.canvas.height / (2 * (view.ortho || 1));
-      for (const pass of [0, 1]) {
+      for (const pass of [0, 1, 2]) {
         gl.uniform1f(S.u.u_pass, pass);
         gl.depthMask(pass === 0);
         for (const sb of scene.sprites) {
-          if (!sb.slot || !sb.slot.n) continue;
+          if (!sb.slot || !sb.slot.n || !!sb.soft !== (pass === 2)) continue;
           gl.bindTexture(gl.TEXTURE_2D, sb.tex.tex);
           gl.uniform2f(S.u.u_tex, sb.tex.w, sb.tex.h);
           gl.uniform1f(S.u.u_k, devPpm / sb.ppm);
+          gl.uniform1f(S.u.u_frames, sb.frames || 4);
+          gl.uniform1f(S.u.u_fps, sb.fps || 4);
           gl.bindVertexArray(sb.slot.vao);
           gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, sb.slot.n);
           st.tris += 2 * sb.slot.n;

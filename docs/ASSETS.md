@@ -219,12 +219,13 @@ attaches a sprite to a map building by its id, so placing these again needs buil
 | Mid-rise (5 storeys, shops) | larger shop / government buildings that fit | 8 × 3 | 10 × 12 m, 17.6 m |
 | Townhouse (2 storeys, sari-sari store) | two-storey houses and shops that fit | 8 × 3 | 7 × 9 m, ridge 7.6 m |
 | Coconut palm, mango tree, banana plant | the 3D cone trees and palms | 2 × 4 sway frames | 11.5 m, 9 m, 4.3 m |
+| Fire, smoke | burning damaged and destroyed sprite buildings | 12- and 24-frame loops | 4.6 m flames, 13 m plume |
 
 * **Source.** `tools/town3d/` holds the models (signed-distance scenes, `church.py`, `school.py`,
   `hospital.py`, `townhouse.py`, `midrise.py`, `trees.py`) and the renderer. `render_sheet.py <name>
   <frame> <ax> <ay>` and `build_trees.py` render the frames at 17.3 px/m with the game's camera
   (orthographic, 0.87 rad down, light from the screen's top-left); `game_town.py` packs them at half
-  resolution into 256-colour pages (1.6 MB in all) and writes `town.json`.
+  resolution into 256-colour pages (1.6 MB in all), adds the fire and smoke loops (0.2 MB) and writes `town.json`.
 * **Which buildings.** `game_town.py` matches sprites to map buildings by archetype, size and
   orientation and checks each new lot (with its yard or forecourt) against other buildings and
   roads; covered walkways under a forecourt are hidden. The sprites exist in 8 views, so the camera
@@ -238,6 +239,13 @@ attaches a sprite to a map building by its id, so placing these again needs buil
   correctly. Trees sway at 4 fps with a random phase.
 * **The camera** still turns in 90° steps from the town's street grid (`camera_yaw_deg`, 64°), the
   angle the sprites are drawn for, so buildings added from these sprites line up.
+* **Fire and smoke.** Damaged and destroyed sprite buildings burn: a 1 s flame loop (12 frames,
+  full resolution) and a 2 s plume of thick dark smoke (24 frames, half resolution) from
+  `tools/town3d/fx.py`, at fire points `tools/town3d/burn.py` takes from each model (burnt-out
+  windows and shell holes, holes in the roof, the largest rubble heaps and burnt floors) and tests
+  for each of the 8 views. Where the building hides a fire, the building covers it and only the
+  smoke above the roof shows; where it does not, its depth is brought in front of the building's
+  depth box (a slab along the wall for wall fires). Each fire has its own animation phase.
 * **Scale.** Soldiers and infected are drawn 1.45 m tall on screen (a 1.8 m man as the 50° camera
   sees him, 1.1× life; brutes 1.45×). Far out they keep at least 12 px but never more than a
   single-storey wall, so every house, wall and tree stands taller than them.

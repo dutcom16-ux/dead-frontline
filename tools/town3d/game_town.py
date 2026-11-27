@@ -4,7 +4,8 @@
 
 1. Packs the pre-rendered buildings (townhouse, mid-rise, church, school, hospital: 3 states x 8
    views) and trees (coconut palm, mango, banana: 2 views x 4 sway frames) at half resolution,
-   trimmed, into one 256-colour atlas page per kind.
+   trimmed, into one 256-colour atlas page per kind; and the fire and smoke loops (fx.py) with
+   every building's fire points (burn.py) for its damaged and destroyed states.
 2. Picks the map buildings that become sprite buildings: the landmark church and hospital, and
    school blocks, two-storey houses and shop buildings whose size and orientation fit a sprite.
    The sprites are drawn for 8 fixed views, so the camera is turned to the town's street grid
@@ -167,6 +168,37 @@ def pack_trees():
         k["views"].append([x, y, int(w), int(h), int(w) + 3, round(ax, 2), round(ay, 2)])
     print(f"  trees: page {size[0]}x{size[1]}, {os.path.getsize(os.path.join(OUT, 'trees.png')) // 1024} KB")
     return {"page": "trees.png", "size": size, "kinds": kinds, "fps": 4}
+
+
+def pack_fx():
+    """fire (full resolution) and smoke (half) loops as one strip each, and the fire points of
+    every building's damaged and destroyed states (from burn.py)"""
+    out = {}
+    for kind, k, fps in (("fire", 1.0, 12), ("smoke", SCALE, 12)):
+        fr = np.load(os.path.join(HERE, "out_fx", kind + ".npy"))               # premultiplied frames
+        anchor = (24.0, 74.0) if kind == "fire" else (39.2, 214.0)
+        ims = []
+        for f in fr:
+            a = f[..., 3:4]
+            rgb = np.where(a > 1e-4, f[..., :3] / np.maximum(a, 1e-4), 0)
+            im = Image.fromarray((np.clip(np.concatenate([rgb, a], -1), 0, 1) * 255 + 0.5).astype(np.uint8), "RGBA")
+            ims.append(premul_resize(im, k) if k != 1.0 else im)
+        w, h = ims[0].size
+        page = Image.new("RGBA", (len(ims) * (w + 3), h), (0, 0, 0, 0))
+        for i, im in enumerate(ims):
+            page.paste(im, (i * (w + 3), 0))
+        page.save(os.path.join(OUT, kind + ".png"), optimize=True)
+        out[kind] = {"page": kind + ".png", "ppm": round(SRC_PPM * k, 4), "frame": [0, 0, w, h, w + 3, round(anchor[0] * k, 2), round(anchor[1] * k, 2)],
+                     "frames": len(ims), "fps": fps, "box": [1.0, 4.5] if kind == "fire" else [2.0, 14.0]}
+        print(f"  {kind}: {len(ims)} frames {w}x{h}, {os.path.getsize(os.path.join(OUT, kind + '.png')) // 1024} KB")
+    burn = json.load(open(os.path.join(HERE, "out_fx", "burning.json")))
+    # then: in which of the 8 views the building does not hide the fire (bit v = view v), and for a
+    # fire on a wall the yaw of the wall's outward normal (else null)
+    out["emitters"] = {name: {st: [[e["kind"], *e["pos"], e["scale"], e["phase"],
+                                    sum(1 << v for v in range(8) if d["states"][st]["views"][v][i]["layer"] == "front"), e.get("wall")]
+                                   for i, e in enumerate(d["states"][st]["emitters"])]
+                              for st in ("damaged", "destroyed")} for name, d in burn.items()}
+    return out
 
 
 # ------------------------------------------------------------------ placement on the map
@@ -354,7 +386,7 @@ def placements():
 def main():
     os.makedirs(OUT, exist_ok=True)
     print("packing")
-    town = {"format": 1, "ppm": round(PPM, 4), "buildings": pack_buildings(), "trees": pack_trees()}
+    town = {"format": 1, "ppm": round(PPM, 4), "buildings": pack_buildings(), "trees": pack_trees(), "fx": pack_fx()}
     print("placing")
     theta0, placed, wind = placements()
     town["camera_yaw_deg"] = round((theta0 + 45) % 360, 2)
