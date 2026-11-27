@@ -1,4 +1,6 @@
 // Service worker: precache every game file, then serve them from the cache (offline after first visit).
+// A new version takes over as soon as it has downloaded (skipWaiting + clients.claim); the page reloads
+// itself into it from the menu (src/engine/pwa.js), so players never stay on an old build.
 const CACHE = __CACHE__;
 const ASSETS = __ASSETS__;
 const tell = async (m) => { for (const c of await self.clients.matchAll({ includeUncontrolled: true, type: "window" })) c.postMessage(m); };
@@ -12,6 +14,7 @@ self.addEventListener("install", (e) => e.waitUntil((async () => {
     tell({ type: "progress", done: ++done, total: ASSETS.length });
   }
   tell({ type: "ready" });
+  await self.skipWaiting();          // don't wait for every open tab or app window to close
 })()));
 self.addEventListener("activate", (e) => e.waitUntil((async () => {
   for (const k of await caches.keys()) if (k !== CACHE && k.startsWith("deadfrontline-")) await caches.delete(k);

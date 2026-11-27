@@ -1,9 +1,10 @@
 // Installable web app: service worker registration, "offline ready" status, install prompt.
-// The service worker (sw.js, written by tools/build_pwa.py) precaches every game file, so after the
+// The service worker (sw.js, written by tools/build.mjs) precaches every game file, so after the
 // first visit over HTTPS the game starts with no connection. Same-origin only: no third parties.
 export class PWA {
-  constructor(onChange) {
+  constructor(onChange, onUpdate) {
     this.onChange = onChange || (() => {});
+    this.onUpdate = onUpdate || (() => {});   // a new version has taken over this page
     this.state = { offline: "checking", progress: 0, installed: false, canInstall: false, update: false, brave: false, standalone: false };
     this.deferred = null;
   }
@@ -19,18 +20,30 @@ export class PWA {
     if (!("serviceWorker" in navigator) || !window.isSecureContext) return this.set({ offline: "unsupported" });
     navigator.serviceWorker.addEventListener("message", (ev) => {
       const d = ev.data || {};
-      if (d.type === "progress") this.set({ offline: "downloading", progress: d.total ? d.done / d.total : 0 });
+      if (d.type === "progress") this.set({ offline: this.state.offline === "updating" ? "updating" : "downloading", progress: d.total ? d.done / d.total : 0 });
       if (d.type === "ready") this.check(); // confirm against the cache itself
       if (d.type === "error") this.set({ offline: "error", error: d.message });
     });
+    // a new version took control (it activates as soon as it has downloaded): reload into it
+    const hadController = !!navigator.serviceWorker.controller;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (!hadController || this.state.update) return;          // first install: nothing to reload
+      this.set({ update: true });
+      this.onUpdate();
+    });
     try {
       const reg = await navigator.serviceWorker.register("sw.js", { scope: "./" });
+      // look for a new version now and whenever the game comes back to the foreground
+      reg.update().catch(() => {});
+      document.addEventListener("visibilitychange", () => { if (!document.hidden) reg.update().catch(() => {}); });
+      setInterval(() => reg.update().catch(() => {}), 10 * 60 * 1000);
       reg.addEventListener("updatefound", () => {
         const w = reg.installing;
-        if (!w) return;
-        w.addEventListener("statechange", () => { if (w.state === "installed" && navigator.serviceWorker.controller) this.set({ update: true }); });
+        if (!w || !navigator.serviceWorker.controller) return;
+        this.set({ offline: "updating", progress: 0 });
       });
-      if (reg.waiting && navigator.serviceWorker.controller) this.set({ update: true });
+      // a version left waiting by an older service worker: let it take over now
+      if (reg.waiting && navigator.serviceWorker.controller) reg.waiting.postMessage({ type: "skipWaiting" });
       await navigator.serviceWorker.ready;
       await this.check();
     } catch (e) {
@@ -68,7 +81,8 @@ export class PWA {
   describe() {
     const s = this.state;
     switch (s.offline) {
-      case "ready": return "Offline ready: every game file is stored on this device";
+      case "ready": return "Offline ready: every game file is stored on this device" + (s.version ? ` · build ${s.version.slice(0, 7)}` : "");
+      case "updating": return `Downloading the new version… ${Math.round(s.progress * 100)}%`;
       case "downloading": return `Downloading for offline play… ${Math.round(s.progress * 100)}%`;
       case "file": return "Opened as a file: plays offline, but cannot be installed (use the HTTPS link to install)";
       case "unsupported": return "Offline install not available here (needs HTTPS and service workers)";
