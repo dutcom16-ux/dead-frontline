@@ -2,17 +2,23 @@
 
 A browser-based 2.5D isometric real-time strategy game. A military task force retakes the
 Philippines from a zombie outbreak, one city at a time. The first battlefield is the **real street
-plan of Toledo City, Cebu**: OpenStreetMap roads, coastline and landmarks. The original buildings
-have been removed so houses and buildings can be added by hand.
+plan of Toledo City, Cebu**: OpenStreetMap roads, coastline and landmarks, built up with a
+pre-rendered town: the church, hospital, schools, market and power plant at their real places and
+some 4,200 houses, shops and schools along the streets.
 
 **Map in use:** `public/maps/toledo_poblacion.mapz` is the package taken from the single-file
-Toledo map you built (`toledo_poblacion.html`), with **all buildings removed** (the 422 OSM buildings
-it had are gone; 0 buildings, 542 roads, 11 landmarks, no corrections). Landmarks keep their map
-position, so objectives and survivors are still placed there; survivors wait in the open until there
-are buildings to shelter in. Buildings the FOB builds during a mission still appear. The
-pre-rendered town's buildings (church, hospital, schools, shops, houses) were placed on map buildings,
-so they are gone too; its building sprites and its trees are kept. The map and town placements as
-they were are in the git history (commit `e40bc53` and earlier). The fuller package with ~10,000 AI-detected footprints
+Toledo map you built (`toledo_poblacion.html`), with its own buildings removed (the 422 OSM buildings
+it had are gone; 542 roads, 11 landmarks, no corrections). The town on it is laid out by
+`tools/town3d/layout.py` and drawn from pre-rendered sprites (`public/sprites/town/town.json`, 4,233
+buildings): the Sahagun church, the General Hospital, school blocks at Consolatrix College, UV Toledo
+and every other school site, the supermarket at the public market (and at the malls), the Toledo
+Power Company plant and a five-storey block at the city hall; then two-storey houses, bungalows and
+five-storey shop blocks along every street, shops in the centre and on the main roads, homes in the
+neighbourhoods and spaced out along country roads, with back lots behind the street front in the
+town. They are not the real buildings: the streets, the land use and the landmarks are real, the
+houses are generated. Landmarks are bound to their building, so city-hall, market and hospital
+survivors shelter inside. Buildings the FOB builds during a mission are added as before. The map as
+it was is in the git history (commit `e40bc53` and earlier). The fuller package with ~10,000 AI-detected footprints
 (Overture/Microsoft) and the Barba sports-complex fix is kept in
 `maps-archive/toledo_poblacion_overture.mapz`. To use it instead, copy it over
 `public/maps/toledo_poblacion.mapz` and rebuild. Any map package from the toledo-map pipeline works
@@ -90,12 +96,13 @@ from the pause menu, reload the page and load the slot. A scripted commander (`t
 the long middle of the mission through the same order and logistics calls the UI uses. The
 simulation is seeded and stepped by the test (`?manualtick`), so runs repeat exactly.
 
-Results on the current map (your `toledo_poblacion.html` package with all buildings removed):
+Results on the current map (your `toledo_poblacion.html` package with the generated town of 4,233
+pre-rendered buildings):
 
 | Run | Result |
 |---|---|
-| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~51 game minutes, 226 infected killed, 7 losses, 19 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
-| Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~52 game minutes (368 infected killed, 14 losses), all 19 survivors evacuated |
+| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~52 game minutes, 240 infected killed, 0 losses, 19 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
+| Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~59 game minutes (423 infected killed, 16 losses), all 19 survivors evacuated |
 | Systems check (`npm run test:systems`) | vehicles drive and carry passengers; engineer-built sandbags + MG emplacement stop a horde; artillery strike; debrief → strategic map with Toledo green and the next operation unlocked; 0 errors |
 | Phones (`npm run test:mobile`) | Android-sized landscape and portrait layouts with the squad chips and 14 commands; tap select works; 0 errors |
 | Soldier animation (`npm run test:anim`) | **36/36 checks pass.** Runs the real sprite drawing at 30 fps while a squad marches a square, turns about and fights; one soldier fires and walks in all 8 main directions; each of the 10 classes fires at a target and moves past it; 8 soldiers die in 8 views. Checked: walk/idle/fire/dying frames in all 16 views at one standing height; barrel tips on the rifle and the barrel pointing the view's way (north stance above the helmet, south at the chest); views change one step at a time without flicker; the walk cycle follows distance and starts with a step; every shot is fired from a figure facing its target (573/573, at most 13° off); every shot shows the shot frame and its flash, never a flash without a shot; automatic weapons stay steady through a burst, single shots kick once; classes that fire on the move keep the firing stance, the others walk; dying plays once and holds; no pose for a dead soldier |
@@ -182,10 +189,10 @@ run by the automated test.
 * **Vehicles in tight alleys.** Vehicles plan on the same 0.5 m grid as infantry. They back up and
   retry when blocked, but in narrow yards they can still get stuck. Keep them on main roads, where
   logistics delivers them (the FOB gate).
-* **No buildings.** With the map's buildings removed, survivors wait in the open at the city hall,
-  market and hospital instead of inside, and soldiers and infected see and move across open ground
-  everywhere: there is no cover, no shelter and nothing to break into. Adding buildings back restores
-  all of that.
+* **A generated town.** The houses and shops stand where the layout put them along the real streets,
+  not where Toledo's buildings really are. Every building faces along the street grid (the sprites
+  have 8 views), so streets that bend away from it have fewer houses. Sprite buildings have no
+  interiors: soldiers inside show through the roof, faded.
 * **Pathing on this map.** Units now detour, sidestep corners and, as a last resort, step out to
   the street after about 12 s without progress. That last step is visible as a short hop. The causes
   are AI-detected footprints that overlap roads or each other, and OSM bridges that end at the bank.
@@ -214,8 +221,8 @@ run by the automated test.
 ## Map data and accuracy
 
 * Roads, coast, landmarks and names: © OpenStreetMap contributors (ODbL).
-* Buildings: none at present. The OSM and AI-detected footprints were removed so buildings can be
-  added by hand.
+* Buildings: generated (`tools/town3d/layout.py`) along the OSM streets and land use, landmarks at
+  their OSM positions. They are not the real footprints.
 * Landmark matches (city hall,
   hospital, market, port, power plant, plaza) come from OSM names and tags. Check them on the ground.
   In particular, the city-hall objective uses the OSM feature "Toledo Garden City Hall".
@@ -243,7 +250,7 @@ src/game/fob/              the single FOB
 src/game/logistics/        supply requests and transports
 src/game/campaign/         campaign state      src/game/save/   save slots
 src/game/rendering/        Models (placeholder art), SceneRender, Sprites (soldier, infected and effect sprite sheets),
-                           TownSprites (pre-rendered trees; building sprites kept, none placed)
+                           TownSprites (the pre-rendered town: every building, and the trees)
 src/game/units/Squads.ts   squads, leaders, formations, formation movement and combat
 src/game/zombies/Infection.ts  bites, turning, rising
 src/game/ui/               Hud, Menus          src/game/audio/  Sfx
