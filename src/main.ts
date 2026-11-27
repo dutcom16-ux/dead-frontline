@@ -25,7 +25,7 @@ class App {
   session!: Session; render!: SceneRender; controls!: Controls; hud!: Hud;
   settings: Settings = { ...DEFAULTS };
   playing = false; last = performance.now(); time = 0; frames = 0; fpsT = 0; fps = 0;
-  menuCam!: IsoCamera; finishing = false; autosaveT = 0; back: () => void = () => {};
+  menuCam!: IsoCamera; menuC: [number, number] = [0, 0]; finishing = false; autosaveT = 0; back: () => void = () => {};
   /** automated tests drive the simulation themselves (deterministic): ?manualtick */
   manualTick = new URLSearchParams(location.search).has("manualtick");
   constructor() { this.bf = new Battlefield($("gl") as HTMLCanvasElement); }
@@ -64,6 +64,7 @@ class App {
     const lm = this.bf.landmark("city_plaza");
     const c = lm && lm.center ? lm.center : this.bf.map.center();
     this.menuCam = new IsoCamera(this.bf.playBounds, c[0], c[1]);
+    this.menuC = [c[0], c[1]];
     this.menuCam.zoom = this.menuCam.tzoom = 160; this.menuCam.snap();
     this.wireMenus();
     this.menus.loading("Ready", 1);
@@ -99,7 +100,11 @@ class App {
       cam = s.cam;
       this.autosaveT += dt;
       if (this.autosaveT > 120) { this.autosaveT = 0; this.autosave(); }
-    } else { this.menuCam.tyaw += dt * 0.04; }
+    } else {
+      // the menu backdrop drifts over the town (no turning: the pre-rendered buildings keep their view)
+      const c = this.menuC, k = this.time;
+      this.menuCam.tx = c[0] + Math.sin(k * 0.031) * 90; this.menuCam.ty = c[1] + Math.sin(k * 0.023) * 60;
+    }
     cam.update(dt, (x, y) => this.bf.h(x, y));
     this.sfx.listener.x = cam.x; this.sfx.listener.y = cam.y; this.sfx.listener.range = cam.zoom * 1.6 + 40;
     try {

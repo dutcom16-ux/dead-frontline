@@ -36,7 +36,7 @@ export class Session {
     const m = buildOp01(g, !snapshot);
     this.mission = m; g.mission = m;
     this.cam = new IsoCamera(this.bf.playBounds, m.lz[0], m.lz[1]);
-    this.cam.zoom = this.cam.tzoom = 34;
+    this.cam.zoom = this.cam.tzoom = 24;   // close enough for life-size figures to read
     const ev = g.onEvent;
     g.onEvent = (e, d) => { ev(e, d); if (e === "fob_established") this.fobAt = g.time; };
     if (snapshot) this.restore(snapshot); else m.begin();
@@ -171,7 +171,7 @@ export class Session {
     g.fob.restore(s.fob);
     m.restore(s.mission);
     if (s.fobAt != null) this.fobAt = g.time + s.fobAt;
-    if (s.cam) { this.cam.tx = s.cam.x; this.cam.ty = s.cam.y; this.cam.tzoom = s.cam.zoom; this.cam.tyaw = s.cam.yaw; }
+    if (s.cam) { this.cam.tx = s.cam.x; this.cam.ty = s.cam.y; this.cam.tzoom = s.cam.zoom; this.cam.tyaw = this.cam.snapYaw(s.cam.yaw); }
     setNextId(1);
     m.unlock();
   }

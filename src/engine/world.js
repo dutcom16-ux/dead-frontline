@@ -478,7 +478,7 @@ export class World {
       }
     }
     this.updateTrees(cx, cy);
-    scene.inst.push({ m: this.treeMesh }, { m: this.palmMesh });
+    if (!this.spriteTrees) scene.inst.push({ m: this.treeMesh }, { m: this.palmMesh });   // else drawn as sprites
     for (const k of this.instOrder) scene.inst.push({ m: this.chars[k] });
     this.buildStats = { built, ms: performance.now() - t0, pending: want.filter((w) => { const v = this.views.get(w.key); return !v.ground || (v.n && !v.b0 && !v.b1); }).length };
     return scene;

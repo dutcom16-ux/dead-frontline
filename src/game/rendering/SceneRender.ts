@@ -224,6 +224,7 @@ export class SceneRender {
     w.lod.far = Math.max(450, Math.min(2200, R + 250));
     const scene = w.update(cam.x, cam.y, Math.floor(time * 60), this.quality === "low" ? 6 : 10);
     scene.lines = lines;
+    scene.sprites = bf.town.frame(bf, cam, R);       // pre-rendered buildings and trees
     const view = cam.view(time);
     if (g && g.shake > 0) { const s = g.shake * 0.4 * (cam.zoom / 60); const j = Math.sin(time * 91.7) * 0.5; view.eye[0] += j * s; view.target[0] += j * s; }
     bf.r.render(view, scene);

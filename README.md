@@ -232,7 +232,8 @@ src/game/missions/         Mission framework, op01 (Toledo)
 src/game/fob/              the single FOB
 src/game/logistics/        supply requests and transports
 src/game/campaign/         campaign state      src/game/save/   save slots
-src/game/rendering/        Models (placeholder art), SceneRender, Sprites (soldier, infected and effect sprite sheets)
+src/game/rendering/        Models (placeholder art), SceneRender, Sprites (soldier, infected and effect sprite sheets),
+                           TownSprites (pre-rendered church, hospital, school, houses and trees)
 src/game/units/Squads.ts   squads, leaders, formations, formation movement and combat
 src/game/zombies/Infection.ts  bites, turning, rising
 src/game/ui/               Hud, Menus          src/game/audio/  Sfx

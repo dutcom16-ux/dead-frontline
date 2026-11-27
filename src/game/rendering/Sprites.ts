@@ -42,7 +42,11 @@ const COMPASS: Dir8[] = ["N", "NE", "E", "SE", "S", "SW", "W", "NW"];
 const STRIDE = [1, 2, 3, 4, 3, 2];
 /** rifle direction on screen for each view (x right, y down); S points at the viewer, N away */
 const RIFLE: Record<Dir8, [number, number]> = { N: [0, -1], NE: [0.6, -0.8], E: [1, 0], SE: [0.97, 0.25], S: [0, 1], SW: [-0.94, 0.34], W: [-1, 0], NW: [-0.6, -0.8] };
-const HUMAN_M = 1.8 * 1.3;   // figures are drawn a little larger than life so they read at RTS zoom
+/** on-screen height of a standing figure in metres: a 1.8 m man as the 50° camera sees him, a touch
+ *  larger than life (1.1x), so every house, wall and tree stands taller than the soldiers and infected */
+const HUMAN_M = 1.45;
+/** far out, figures keep at least MIN_PX, but never more than a single-storey wall (FLOOR_M) */
+const MIN_PX = 12, FLOOR_M = 1.85;
 const TINTS: Record<string, string> = { bloater: "rgba(150,175,40,0.42)", brute: "rgba(30,18,12,0.38)", screamer: "rgba(235,215,225,0.30)", mutant: "rgba(150,25,20,0.36)" };
 const KNEEL = new Set(["line", "defensive", "circle", "box"]);
 /** dying frames per second; shot frame and recoil frame lengths (s); aim kept after a target drops (s) */
@@ -448,7 +452,7 @@ export class Sprites {
   draw(ctx: CanvasRenderingContext2D, g: Game, bf: Battlefield, cam: IsoCamera, W: number, H: number, now: number) {
     if (!this.mil && !this.zombies && !this.zs && !this.fx) return;
     const ppm = H / (2 * cam.zoom);
-    const human = Math.max(20, ppm * HUMAN_M);
+    const human = Math.max(ppm * HUMAN_M, Math.min(MIN_PX, ppm * FLOOR_M));
     const on = (s: [number, number] | null, pad = 80) => !!s && s[0] > -pad && s[1] > -pad && s[0] < W + pad && s[1] < H + pad;
     ctx.imageSmoothingEnabled = human < 90;
     const M = this.mil, Z = this.zombies, ZS = this.zs, FX = this.fx;

@@ -36,6 +36,7 @@ await page.waitForFunction(() => window.__df && window.__df.session && window.__
 const r = await page.evaluate(async () => {
   const A = window.__df, s = A.session, g = s.game, sp = A.render.sprites, cam = s.cam, bf = g.bf;
   A.frame = () => {};                    // the test draws the frames itself, on game time
+  cam.yaw = cam.tyaw = Math.PI / 4;      // the march and the 8-way walks are laid out on the world axes
   g.paths.timeCapMs = Infinity;
   for (const z of g.zombies) z.dead = true;
   for (const n of g.nests) n.spawnT = 1e9;

@@ -201,6 +201,66 @@ void main(){ vec3 d = normalize(v_dir); float t = clamp(d.y * 2.2, 0.0, 1.0);
   vec3 c = mix(u_fogCol, u_skyTop, t); c += vec3(1.0, 0.9, 0.7) * pow(max(dot(d, u_sun), 0.0), 300.0) * 0.8;
   o = vec4(c, 1.0); }`;
 
+// Pre-rendered sprites (town buildings, trees) placed in the 3D world. Each instance is a screen-aligned
+// quad around its map pivot, drawn at the sprite's own pixel scale; its depth comes per pixel from the
+// view ray hitting the object's box (building volume / tree) or else the ground, so sprites and the
+// 3D world hide each other correctly. Pass 0 draws the solid pixels (depth written), pass 1 the soft
+// ones (shadows, edges) over them without writing depth.
+const SPR_VS = `#version 300 es
+layout(location=0) in vec4 i_piv;   // pivot x, height, z (GL), scale
+layout(location=1) in vec4 i_frm;   // frame x, y, w, h in atlas px
+layout(location=2) in vec4 i_anc;   // anchor x, y in the frame, cos(front), sin(front)
+layout(location=3) in vec4 i_box;   // box x0, x1, z0, z1 in sprite metres
+layout(location=4) in vec4 i_ext;   // box top, animation stride (px, 0 = still), phase, ground lift (sprite m)
+uniform mat4 u_vp;
+uniform vec2 u_vpx, u_tex;
+uniform float u_k, u_time;
+out vec2 v_uv; out vec2 v_ndc;
+flat out vec4 v_piv; flat out vec4 v_box; flat out vec4 v_rot;
+void main(){
+  int c = gl_VertexID;
+  vec2 q = vec2((c == 1 || c == 2 || c == 4) ? 1.0 : 0.0, (c == 2 || c == 4 || c == 5) ? 1.0 : 0.0);
+  float col = i_ext.y > 0.0 ? mod(floor(u_time * 4.0 + i_ext.z), 4.0) : 0.0;
+  vec2 fpx = q * i_frm.zw;
+  vec2 off = (fpx - i_anc.xy) * u_k * i_piv.w;
+  vec4 pc = u_vp * vec4(i_piv.xyz, 1.0);
+  vec2 ndc = pc.xy / pc.w + vec2(off.x, -off.y) * 2.0 / u_vpx;
+  gl_Position = vec4(ndc, 0.0, 1.0);
+  v_uv = (i_frm.xy + vec2(col * i_ext.y, 0.0) + fpx) / u_tex;
+  v_ndc = ndc; v_piv = i_piv; v_box = i_box; v_rot = vec4(i_anc.zw, i_ext.x, i_ext.w);
+}`;
+const SPR_FS = `#version 300 es
+precision highp float;
+uniform sampler2D u_img;
+uniform mat4 u_vp, u_ivp;
+uniform vec3 u_fogCol, u_cam;
+uniform vec2 u_fog;
+uniform float u_pass;
+in vec2 v_uv; in vec2 v_ndc;
+flat in vec4 v_piv; flat in vec4 v_box; flat in vec4 v_rot;
+out vec4 o;
+void main(){
+  vec4 t = texture(u_img, v_uv);
+  if (t.a < 0.004 || (u_pass < 0.5 ? t.a < 0.5 : t.a >= 0.5)) discard;
+  vec4 a = u_ivp * vec4(v_ndc, -1.0, 1.0), b = u_ivp * vec4(v_ndc, 1.0, 1.0);
+  vec3 ro = a.xyz / a.w, rd = normalize(b.xyz / b.w - ro);
+  // sprite space: x = width, y = up, z = the front; metres before scaling
+  vec3 X = vec3(-v_rot.x, 0.0, -v_rot.y), Z = vec3(v_rot.y, 0.0, -v_rot.x);
+  vec3 p = (ro - v_piv.xyz) / v_piv.w;
+  vec3 lo = vec3(dot(p, X), p.y, dot(p, Z)), ld = vec3(dot(rd, X), rd.y, dot(rd, Z));
+  vec3 inv = 1.0 / ld;
+  vec3 t0 = (vec3(v_box.x, v_rot.w, v_box.z) - lo) * inv, t1 = (vec3(v_box.y, v_rot.z, v_box.w) - lo) * inv;
+  vec3 tn = min(t0, t1), tf = max(t0, t1);
+  float tin = max(max(tn.x, tn.y), tn.z), tout = min(min(tf.x, tf.y), tf.z);
+  // the box, else the ground: lifted to the highest terrain under the sprite, so a slope never hides it
+  float th = (tin <= tout && tout > 0.0) ? tin : (v_rot.w - lo.y) / ld.y;
+  vec3 hit = ro + rd * (th * v_piv.w);
+  vec4 cp = u_vp * vec4(hit, 1.0);
+  gl_FragDepth = clamp(cp.z / cp.w * 0.5 + 0.5, 0.0, 1.0);
+  float f = smoothstep(u_fog.x, u_fog.y, length(u_cam - hit));
+  o = vec4(mix(t.rgb, u_fogCol * t.a, f), t.a);
+}`;
+
 function compile(gl, vs, fs) {
   const p = gl.createProgram();
   for (const [type, src] of [[gl.VERTEX_SHADER, vs], [gl.FRAGMENT_SHADER, fs]]) {
@@ -228,6 +288,7 @@ export class Renderer {
     this.inst = compile(gl, INST_VS, INST_FS);
     this.line = compile(gl, LINE_VS, LINE_FS);
     this.sky = compile(gl, SKY_VS, SKY_FS);
+    this.spr = compile(gl, SPR_VS, SPR_FS);
     this.skyVao = gl.createVertexArray();
     const atlas = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, atlas);
@@ -344,6 +405,42 @@ export class Renderer {
     if (data.byteLength > m.cap) { gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); m.cap = data.byteLength; }
     else gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, n * 8));
     m.n = n;
+  }
+
+  // a sprite atlas page (premultiplied, mipmapped)
+  spriteTexture(img) {
+    const gl = this.gl;
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, img);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAX_LEVEL, 4);
+    this.gpuBytes += img.width * img.height * 5.3;
+    return { tex, w: img.width, h: img.height };
+  }
+  // instance buffer for a sprite batch (20 floats per instance)
+  spriteBatch(slot, data, n) {
+    const gl = this.gl;
+    if (!slot) {
+      const vao = gl.createVertexArray();
+      gl.bindVertexArray(vao);
+      const buf = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+      for (let k = 0; k < 5; k++) { gl.enableVertexAttribArray(k); gl.vertexAttribPointer(k, 4, gl.FLOAT, false, 80, k * 16); gl.vertexAttribDivisor(k, 1); }
+      gl.bindVertexArray(null);
+      slot = { vao, buf, cap: 0, n: 0 };
+    }
+    gl.bindBuffer(gl.ARRAY_BUFFER, slot.buf);
+    if (data.byteLength > slot.cap) { gl.bufferData(gl.ARRAY_BUFFER, data, gl.DYNAMIC_DRAW); slot.cap = data.byteLength; }
+    else gl.bufferSubData(gl.ARRAY_BUFFER, 0, data.subarray(0, n * 20));
+    slot.n = n;
+    return slot;
   }
 
   makeBoxGeo() {
@@ -465,6 +562,40 @@ export class Renderer {
       if (useOcc && !near) queried.push(it);
     }
     gl.bindTexture(gl.TEXTURE_2D, this.emptyState.tex);
+
+    // pre-rendered town sprites: solid pixels first, then shadows and soft edges
+    if (scene.sprites && scene.sprites.length) {
+      const S = this.spr;
+      gl.useProgram(S.p);
+      gl.uniformMatrix4fv(S.u.u_vp, false, VP);
+      gl.uniformMatrix4fv(S.u.u_ivp, false, this.IVP);
+      gl.uniform2f(S.u.u_vpx, this.canvas.width, this.canvas.height);
+      gl.uniform1f(S.u.u_time, view.time);
+      gl.uniform3fv(S.u.u_fogCol, this.env.fog);
+      gl.uniform3fv(S.u.u_cam, view.eye);
+      gl.uniform2fv(S.u.u_fog, view.fog);
+      gl.uniform1i(S.u.u_img, 0);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.enable(gl.BLEND);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      const devPpm = this.canvas.height / (2 * (view.ortho || 1));
+      for (const pass of [0, 1]) {
+        gl.uniform1f(S.u.u_pass, pass);
+        gl.depthMask(pass === 0);
+        for (const sb of scene.sprites) {
+          if (!sb.slot || !sb.slot.n) continue;
+          gl.bindTexture(gl.TEXTURE_2D, sb.tex.tex);
+          gl.uniform2f(S.u.u_tex, sb.tex.w, sb.tex.h);
+          gl.uniform1f(S.u.u_k, devPpm / sb.ppm);
+          gl.bindVertexArray(sb.slot.vao);
+          gl.drawArraysInstanced(gl.TRIANGLES, 0, 6, sb.slot.n);
+          st.tris += 2 * sb.slot.n;
+        }
+      }
+      gl.depthMask(true);
+      gl.disable(gl.BLEND);
+      gl.activeTexture(gl.TEXTURE1);
+    }
 
     // instanced trees / characters
     const I = this.inst;

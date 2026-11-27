@@ -12,7 +12,7 @@ const browser = await chromium.launch({ args: ["--use-gl=angle", "--use-angle=sw
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 const errors = [];
 page.on("pageerror", (e) => errors.push(e.message));
-await page.addInitScript(() => { let s = 777; Math.random = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; });
+await page.addInitScript(() => { let s = 777; Math.random = () => { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; }; window.__reseed = (v) => { s = v >>> 0; }; });
 await page.goto(`http://localhost:${PORT}/?manualtick`);
 await page.waitForSelector("#menu:not([hidden])", { timeout: 90000 });
 await page.click("#mNew"); await page.click('[data-diff="medium"]');
@@ -80,6 +80,10 @@ async function scenario(name, code, shot) {
   if (ONLY && !ONLY.includes(name.split(" ")[0])) return;
   const t0 = Date.now();
   let r;
+  // every scenario starts from its own seed: the outcome does not depend on what the mission spawned
+  // across the map before it (or on which scenarios ran first)
+  let h = 777; for (const ch of name) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0;
+  await page.evaluate((v) => window.__reseed(v), h);
   try { r = await page.evaluate(code); } catch (e) { r = { pass: false, detail: "error: " + e.message }; }
   if (shot) { await page.waitForTimeout(1500); await page.screenshot({ path: path.join(OUT, shot) }); }
   results.push({ name, ...r, s: ((Date.now() - t0) / 1000).toFixed(0) });
