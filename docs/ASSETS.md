@@ -196,15 +196,22 @@ drawn from the military sprite sheet instead of these models when it loads.
 
 ## Buildings
 
-Buildings come from the Toledo map package. The engine's procedural Philippine archetypes
-(`src/engine/archetypes.js`) generate them from footprint, storeys, roof type and materials. Facade
-and roof textures live in `src/engine/atlas.js`, which is a code-drawn texture atlas.
+The map package's buildings were all removed (2026-11-27): every chunk in
+`public/maps/toledo_poblacion.mapz` has an empty building list, and landmarks keep only their centre
+point. Buildings are to be added by hand. Buildings the FOB constructs in a mission are added at run
+time (`MapData.addBuilding`) and still appear. The pre-rendered town's building placements went
+with them (see below); its trees stay. The engine's procedural Philippine archetypes
+(`src/engine/archetypes.js`) and the code-drawn facade and roof textures (`src/engine/atlas.js`) are
+still there for any building added with a footprint.
 
 ## Pre-rendered town (`public/sprites/town/*`)
 
-Selected map buildings and all trees are pre-rendered sprites (`src/game/rendering/TownSprites.ts`):
+All trees are pre-rendered sprites (`src/game/rendering/TownSprites.ts`). The building sprites below
+are kept, but **none is placed at present**: their placements (51, on map buildings) were removed
+with the map's buildings on 2026-11-27, and `town.json` has an empty `placements` list. A placement
+attaches a sprite to a map building by its id, so placing these again needs buildings in the map.
 
-| Sprite | Replaces | Views × states | Size |
+| Sprite | Replaced (before 2026-11-27) | Views × states | Size |
 |---|---|---|---|
 | Church (stone, bell tower, plaza) | the San Juan de Sahagun shrine (landmark) | 8 × intact/damaged/destroyed | nave walls 8.5 m, tower 20.6 m (×1.3 here) |
 | Hospital (4 storeys, helipad, emergency bay) | Toledo City General Hospital main block | 8 × 3 | 28 × 14 m, 18 m to the stair core |
@@ -229,6 +236,8 @@ Selected map buildings and all trees are pre-rendered sprites (`src/game/renderi
   Sprites are drawn inside the 3D pass: each pixel's depth comes from the view ray hitting the
   building's box (or the tree's) or else the ground, so 3D buildings and sprites hide each other
   correctly. Trees sway at 4 fps with a random phase.
+* **The camera** still turns in 90° steps from the town's street grid (`camera_yaw_deg`, 64°), the
+  angle the sprites are drawn for, so buildings added from these sprites line up.
 * **Scale.** Soldiers and infected are drawn 1.45 m tall on screen (a 1.8 m man as the 50° camera
   sees him, 1.1× life; brutes 1.45×). Far out they keep at least 12 px but never more than a
   single-storey wall, so every house, wall and tree stands taller than them.

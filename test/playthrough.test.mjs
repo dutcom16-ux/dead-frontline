@@ -45,8 +45,8 @@ try {
   // 3. Toledo battlefield
   await page.waitForTimeout(3000);
   await shot("03_battlefield");
-  const bfInfo = await ev(() => { const bf = window.__df.bf; let n = 0; for (const _ of bf.map.buildings()) n++; return { expected: (bf.map.manifest.stats || {}).buildings || 1, buildings: n, roads: bf.map.layers.roads.length, landmarks: [...bf.landmarks.keys()].length, attribution: bf.attribution.slice(0, 60), chunks: bf.r.stats.drawn, ground: bf.r.stats.ground, tris: bf.r.stats.tris }; });
-  check(3, "View the Toledo City battlefield", bfInfo.buildings > 0 && bfInfo.buildings >= bfInfo.expected && bfInfo.roads > 400 && bfInfo.ground > 0 && bfInfo.tris > 1000, `${bfInfo.buildings} buildings, ${bfInfo.roads} roads, ${bfInfo.landmarks} landmarks, ${bfInfo.ground} terrain/road tiles and ${bfInfo.chunks} building chunks drawn, ${bfInfo.tris} triangles`);
+  const bfInfo = await ev(() => { const bf = window.__df.bf; let n = 0; for (const _ of bf.map.buildings()) n++; return { expected: (bf.map.manifest.stats || {}).buildings ?? 1, buildings: n, roads: bf.map.layers.roads.length, landmarks: [...bf.landmarks.keys()].length, attribution: bf.attribution.slice(0, 60), chunks: bf.r.stats.drawn, ground: bf.r.stats.ground, tris: bf.r.stats.tris }; });
+  check(3, "View the Toledo City battlefield", (bfInfo.expected === 0 ? bfInfo.buildings === 0 : bfInfo.buildings >= bfInfo.expected) && bfInfo.roads > 400 && bfInfo.ground > 0 && bfInfo.tris > 1000, `${bfInfo.buildings} buildings, ${bfInfo.roads} roads, ${bfInfo.landmarks} landmarks, ${bfInfo.ground} terrain/road tiles and ${bfInfo.chunks} building chunks drawn, ${bfInfo.tris} triangles`);
 
   // 4. camera: keys pan, wheel zoom, Q rotates
   const c0 = await ev(() => { const c = window.__df.session.cam; return { x: c.tx, y: c.ty, z: c.tzoom, yaw: c.tyaw }; });
