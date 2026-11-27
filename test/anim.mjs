@@ -256,7 +256,10 @@ const r = await page.evaluate(async () => {
     const seq = (log.get(u.id) || []).filter((q) => q.t > t0);
     let flips = 0, firingT = 0;
     for (let j = 1; j < seq.length; j++) { if (seq[j].state === "fire") firingT += seq[j].t - seq[j - 1].t; if (/^fire_/.test(seq[j].anim) && /^fire_/.test(seq[j - 1].anim) && seq[j].i !== seq[j - 1].i) flips++; }
-    const shots = seq.length ? seq[seq.length - 1].shotN - seq[0].shotN : 0;
+    // shots fired in the window, counted from the last frame before it (a shot on the window's first
+    // frame has its flash and kick inside the window, so it counts too)
+    const before = (log.get(u.id) || []).filter((q) => q.t <= t0).pop();
+    const shots = seq.length ? seq[seq.length - 1].shotN - (before ? before.shotN : seq[0].shotN) : 0;
     // then walk past the target while it is in sight
     const p = [u.x - vx * 12, u.y - vy * 12];
     A.__issue(g, [u], { kind: "move", x: p[0], y: p[1] }, {});

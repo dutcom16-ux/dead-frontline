@@ -2,11 +2,17 @@
 
 A browser-based 2.5D isometric real-time strategy game. A military task force retakes the
 Philippines from a zombie outbreak, one city at a time. The first battlefield is the **real street
-plan of Toledo City, Cebu**: OpenStreetMap roads, coastline, landmarks and buildings.
+plan of Toledo City, Cebu**: OpenStreetMap roads, coastline and landmarks. The original buildings
+have been removed so houses and buildings can be added by hand.
 
 **Map in use:** `public/maps/toledo_poblacion.mapz` is the package taken from the single-file
-Toledo map you built (`toledo_poblacion.html`). It has the OSM-mapped buildings only: 422 buildings,
-542 roads, 11 landmarks, no corrections. The fuller package with ~10,000 AI-detected footprints
+Toledo map you built (`toledo_poblacion.html`), with **all buildings removed** (the 422 OSM buildings
+it had are gone; 0 buildings, 542 roads, 11 landmarks, no corrections). Landmarks keep their map
+position, so objectives and survivors are still placed there; survivors wait in the open until there
+are buildings to shelter in. Buildings the FOB builds during a mission still appear. The
+pre-rendered town's buildings (church, hospital, schools, shops, houses) were placed on map buildings,
+so they are gone too; its building sprites and its trees are kept. The map and town placements as
+they were are in the git history (commit `e40bc53` and earlier). The fuller package with ~10,000 AI-detected footprints
 (Overture/Microsoft) and the Barba sports-complex fix is kept in
 `maps-archive/toledo_poblacion_overture.mapz`. To use it instead, copy it over
 `public/maps/toledo_poblacion.mapz` and rebuild. Any map package from the toledo-map pipeline works
@@ -84,12 +90,12 @@ from the pause menu, reload the page and load the slot. A scripted commander (`t
 the long middle of the mission through the same order and logistics calls the UI uses. The
 simulation is seeded and stepped by the test (`?manualtick`), so runs repeat exactly.
 
-Results on the current map (your `toledo_poblacion.html` package, 422 OSM buildings):
+Results on the current map (your `toledo_poblacion.html` package with all buildings removed):
 
 | Run | Result |
 |---|---|
-| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~61 game minutes, 255 infected killed, 1 loss, 19 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
-| Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~67 game minutes (389 infected killed, 16 losses), all 19 survivors evacuated |
+| Low infection | **16/16 criteria pass, 0 page errors** (squads moving in formation, infection on). Toledo liberated after ~51 game minutes, 226 infected killed, 7 losses, 19 survivors evacuated, FOB established, convoy + heavy weapons team delivered, save → reload → load restores the same state including squads (IndexedDB) |
+| Medium infection | **16/16 criteria pass, 0 page errors** (squads, infection on). Toledo liberated after ~52 game minutes (368 infected killed, 14 losses), all 19 survivors evacuated |
 | Systems check (`npm run test:systems`) | vehicles drive and carry passengers; engineer-built sandbags + MG emplacement stop a horde; artillery strike; debrief → strategic map with Toledo green and the next operation unlocked; 0 errors |
 | Phones (`npm run test:mobile`) | Android-sized landscape and portrait layouts with the squad chips and 14 commands; tap select works; 0 errors |
 | Soldier animation (`npm run test:anim`) | **36/36 checks pass.** Runs the real sprite drawing at 30 fps while a squad marches a square, turns about and fights; one soldier fires and walks in all 8 main directions; each of the 10 classes fires at a target and moves past it; 8 soldiers die in 8 views. Checked: walk/idle/fire/dying frames in all 16 views at one standing height; barrel tips on the rifle and the barrel pointing the view's way (north stance above the helmet, south at the chest); views change one step at a time without flicker; the walk cycle follows distance and starts with a step; every shot is fired from a figure facing its target (573/573, at most 13° off); every shot shows the shot frame and its flash, never a flash without a shot; automatic weapons stay steady through a burst, single shots kick once; classes that fire on the move keep the firing stance, the others walk; dying plays once and holds; no pose for a dead soldier |
@@ -176,6 +182,10 @@ run by the automated test.
 * **Vehicles in tight alleys.** Vehicles plan on the same 0.5 m grid as infantry. They back up and
   retry when blocked, but in narrow yards they can still get stuck. Keep them on main roads, where
   logistics delivers them (the FOB gate).
+* **No buildings.** With the map's buildings removed, survivors wait in the open at the city hall,
+  market and hospital instead of inside, and soldiers and infected see and move across open ground
+  everywhere: there is no cover, no shelter and nothing to break into. Adding buildings back restores
+  all of that.
 * **Pathing on this map.** Units now detour, sidestep corners and, as a last resort, step out to
   the street after about 12 s without progress. That last step is visible as a short hop. The causes
   are AI-detected footprints that overlap roads or each other, and OSM bridges that end at the bank.
@@ -204,9 +214,9 @@ run by the automated test.
 ## Map data and accuracy
 
 * Roads, coast, landmarks and names: © OpenStreetMap contributors (ODbL).
-* Building footprints: OSM where mapped. Elsewhere they are AI-detected footprints from Overture Maps /
-  Microsoft (ODbL).
-* Heights, roofs and facades are **estimates**, not measurements. Landmark matches (city hall,
+* Buildings: none at present. The OSM and AI-detected footprints were removed so buildings can be
+  added by hand.
+* Landmark matches (city hall,
   hospital, market, port, power plant, plaza) come from OSM names and tags. Check them on the ground.
   In particular, the city-hall objective uses the OSM feature "Toledo Garden City Hall".
 * No Google Maps imagery, tiles, Street View or 3D models were used or traced.
@@ -233,7 +243,7 @@ src/game/fob/              the single FOB
 src/game/logistics/        supply requests and transports
 src/game/campaign/         campaign state      src/game/save/   save slots
 src/game/rendering/        Models (placeholder art), SceneRender, Sprites (soldier, infected and effect sprite sheets),
-                           TownSprites (pre-rendered church, hospital, school, houses and trees)
+                           TownSprites (pre-rendered trees; building sprites kept, none placed)
 src/game/units/Squads.ts   squads, leaders, formations, formation movement and combat
 src/game/zombies/Infection.ts  bites, turning, rising
 src/game/ui/               Hud, Menus          src/game/audio/  Sfx
