@@ -2,22 +2,21 @@
 
     cd tools/town3d && python3 game_town.py        (frames from render_sheet.py / build_trees.py)
 
-1. Packs the pre-rendered buildings (townhouse, mid-rise, church, school, hospital: 3 states x 8
-   views) and trees (coconut palm, mango, banana: 2 views x 4 sway frames) at half resolution,
+1. Packs the pre-rendered buildings (townhouse, bungalow, mid-rise, church, school, hospital,
+   supermarket, power plant: 3 states x 8 views) and trees (coconut palm, mango, banana: 2 views x 4 sway frames) at half resolution,
    trimmed, into one 256-colour atlas page per kind; and the fire and smoke loops (fx.py) with
    every building's fire points (burn.py) for its damaged and destroyed states.
-2. Picks the map buildings that become sprite buildings: the landmark church and hospital, and
-   school blocks, two-storey houses and shop buildings whose size and orientation fit a sprite.
-   The sprites are drawn for 8 fixed views, so the camera is turned to the town's street grid
-   (camera_yaw_deg) and a building is only used where it lines up with the grid within 12 deg.
-   Each chosen building takes the sprite's footprint, height and entrance (collision, navigation,
-   line of sight and the minimap all follow), scaled to fit the lot.
+2. Lays out the town (layout.py): the map package has no buildings, so every building is a sprite
+   building placed here — the landmarks (church, hospital, schools, supermarket, power plant,
+   city hall block) and houses and shops along the streets. The sprites are drawn for 8 fixed
+   views, so the camera is turned to the street grid (camera_yaw_deg) and every building faces
+   along it. The game makes a map building from each placement (footprint, height, entrance;
+   collision, navigation, line of sight and the minimap all follow).
 
 Building space (all sprites): x = width, y = up, z = depth, +z = the front; the pivot (map anchor)
 is the building's origin. A point (x, z) goes to the map at pivot + s * (x * u(front - 90) + z * u(front))
 with u(c) = (sin c, cos c) for a compass bearing c (x east, y north).
 """
-import gzip
 import json
 import math
 import os
@@ -26,10 +25,11 @@ import sys
 import numpy as np
 from PIL import Image
 
+from layout import town_layout
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 OUT = os.path.join(ROOT, "public/sprites/town")
-MAP = os.path.join(ROOT, "public/maps/toledo_poblacion.mapz")
 SRC_PPM = 320 / 18.5          # px per metre of the renders
 SCALE = 0.5                   # atlas resolution relative to the renders
 PPM = SRC_PPM * SCALE
@@ -52,6 +52,18 @@ BUILDINGS = {
     "hospital": dict(src="out_hospital", F=784, pivot=(0.4845, 0.583),
                      fp=[14.0, 7.0, -14.0, 7.0, -14.0, 2.6, -16.2, 2.6, -16.2, -2.6, -14.0, -2.6, -14.0, -7.0, 14.0, -7.0],
                      ent=[0, 0.73], box=[-16.3, 14.1, -7.0, 7.0, 18.2], lot=[-16.5, 15.5, -8.0, 15.5], lv=4, h=15.0, rh=0.0, long="x"),
+    "bungalow": dict(src="out_bungalow", F=448, pivot=(0.492, 0.515),
+                     fp=[5.5, 2.5, -5.5, 2.5, -5.5, -4.0, 5.5, -4.0], ent=[0, 0.61],
+                     box=[-6.0, 9.1, -4.6, 4.7, 5.2], lot=[-6.7, 9.5, -5.7, 6.4], lv=1, h=3.4, rh=1.75, long="x"),
+    "supermarket": dict(src="out_supermarket", F=720, pivot=(0.495, 0.529),
+                        fp=[12.0, 2.7, -12.0, 2.7, -12.0, -12.3, 12.0, -12.3], ent=[0, 0.29],
+                        box=[-12.6, 12.6, -12.4, 7.5, 9.3], lot=[-13.7, 13.7, -14.9, 15.1], lv=1, h=7.0, rh=0.0, long="x"),
+    "powerplant": dict(src="out_powerplant", F=880, pivot=(0.493, 0.641),
+                       fp=[5.0, 6.0, -15.0, 6.0, -15.0, -4.0, 5.0, -4.0, 5.0, -8.0, 13.0, -8.0, 13.0, 4.0, 5.0, 4.0], ent=[1, 0.5],
+                       box=[-15.3, 15.8, -8.3, 6.1, 21.6], lot=[-17.3, 16.3, -14.9, 13.9], lv=3, h=13.0, rh=0.0, long="x",
+                       # solid yard structures besides the halls: x0, x1, z0, z1, height
+                       parts=[[-16.4, -8.0, 7.4, 12.6, 6.0], [-17.0, -2.5, -14.5, -6.3, 9.0], [6.2, 15.6, 5.8, 13.4, 2.2],
+                              [-3.0, 0.0, 11.0, 13.4, 2.8], [7.6, 10.4, -12.4, -9.6, 30.0], [13.0, 15.7, 0.3, 3.9, 22.0]]),
 }
 # church outline: facade and bell tower in front, the nave with its buttresses, the round apse behind
 BUILDINGS["church"]["fp"] = [7.0, 11.2, -10.5, 11.2, -10.5, 6.2, -5.6, 6.2, -5.6, -12.0] + \
@@ -64,17 +76,6 @@ TREES = {   # kind: map tree kinds, height, depth box half size, the two views u
     "banana": dict(src="banana_plant", F=192, pivot=(0.42, 0.62), h=4.3, r=1.6, views=[1, 5]),
 }
 
-# which map archetypes may take which sprite (and how many at most)
-RULES = [
-    ("church", ("landmark_church",), 1, (0.8, 1.3)),
-    ("hospital", ("landmark_hospital",), 1, (0.8, 1.25)),
-    ("school", ("school_block", "college_block"), 14, (0.8, 1.2)),
-    ("midrise", ("shop_commercial", "government_hall"), 6, (0.85, 1.25)),
-    ("townhouse", ("concrete_house_2f", "shop_commercial"), 40, (0.85, 1.3)),
-]
-MAX_ERR = 12.0
-DIAG = {"school", "hospital"}
-DEBUG = set(os.environ.get("TOWN_DEBUG", "").split(","))
 
 
 # ------------------------------------------------------------------ atlas packing
@@ -142,7 +143,7 @@ def pack_buildings():
         pos, size = save_page(ims, name)
         frames = [[[*pos[st * 8 + v], ims[st * 8 + v].width, ims[st * 8 + v].height, *info[st * 8 + v]] for v in range(8)] for st in range(3)]
         meta[name] = {"page": name + ".png", "size": size, "frames": frames, "fp": [round(v, 2) for v in B["fp"]], "ent": B["ent"],
-                      "box": B["box"], "lot": B["lot"], "lv": B["lv"], "h": B["h"], "rh": B["rh"]}
+                      "box": B["box"], "lot": B["lot"], "lv": B["lv"], "h": B["h"], "rh": B["rh"], **({"parts": B["parts"]} if "parts" in B else {})}
         print(f"  {name}: page {size[0]}x{size[1]}, {os.path.getsize(os.path.join(OUT, name + '.png')) // 1024} KB")
     return meta
 
@@ -202,185 +203,20 @@ def pack_fx():
 
 
 # ------------------------------------------------------------------ placement on the map
-def u(c):
-    r = math.radians(c)
-    return np.array([math.sin(r), math.cos(r)])
-
-
-def to_world(px, py, front, s, lx, lz):
-    return np.array([px, py]) + s * (lx * u(front - 90) + lz * u(front))
-
-
-def pip(x, y, f):
-    n, inside, j = len(f) // 2, False, len(f) // 2 - 1
-    for i in range(n):
-        xi, yi, xj, yj = f[2 * i], f[2 * i + 1], f[2 * j], f[2 * j + 1]
-        if (yi > y) != (yj > y) and x < (xj - xi) * (y - yi) / (yj - yi + 1e-12) + xi:
-            inside = not inside
-        j = i
-    return inside
-
-
-def signed_area(f):
-    n = len(f) // 2
-    return 0.5 * sum(f[2 * i] * f[2 * ((i + 1) % n) + 1] - f[2 * ((i + 1) % n)] * f[2 * i + 1] for i in range(n))
-
-
-def load_map():
-    d = json.loads(gzip.open(MAP).read())
-    blds = []
-    for k, v in d.items():
-        if k.startswith("chunks/"):
-            blds += json.loads(v)["buildings"]
-    layers = json.loads(d["layers.json"])
-    return blds, layers
+GRID_DEG = 19.0                 # the street grid of the Poblacion (compass bearing of the main streets)
+ENTER = {"church": 1.0, "hospital": 1.0, "school": 1.0, "supermarket": 1.0, "midrise": 0.6, "townhouse": 0.25, "bungalow": 0.2}
 
 
 def placements():
-    blds, layers = load_map()
-    wind = np.sign(np.median([signed_area(b["fp"]) for b in blds]))
-    road_pts = []
-    for r in layers["roads"]:
-        if r.get("tunnel"):
-            continue
-        p = r["pts"]
-        main = r["class"] not in ("footway", "path", "steps", "track", "service", "pedestrian", "cycleway")
-        for k in range(0, len(p) - 2, 2):
-            a, b = np.array(p[k:k + 2]), np.array(p[k + 2:k + 4])
-            n = max(1, int(np.linalg.norm(b - a)))
-            for t in np.linspace(0, 1, n + 1):
-                q = a + (b - a) * t
-                road_pts.append((q[0], q[1], r.get("w", 4) / 2, main))
-    road_pts = np.array(road_pts)
-
-    def entrance_dir(b):
-        f, (ei, t) = b["fp"], b.get("ent", [0, 0.5])
-        n = len(f) // 2
-        i, j = ei % n, (ei + 1) % n
-        ax, ay, bx, by = f[2 * i], f[2 * i + 1], f[2 * j], f[2 * j + 1]
-        mx, my = ax + (bx - ax) * t, ay + (by - ay) * t
-        L = math.hypot(bx - ax, by - ay) or 1
-        nx, ny = (by - ay) / L, -(bx - ax) / L
-        if pip(mx + nx * 0.4, my + ny * 0.4, f):
-            nx, ny = -nx, -ny
-        return math.degrees(math.atan2(nx, ny)) % 360
-
-    def candidates(theta0):
-        out = []
-        for name, arch, _, (smin, smax) in RULES:
-            B = BUILDINGS[name]
-            bx0, bx1, bz0, bz1, _top = B["box"]
-            mw, ml = bx1 - bx0, bz1 - bz0                     # mass width (x) and length (z)
-            for b in blds:
-                if b.get("a") not in arch or b.get("part_of") or b.get("hidden"):
-                    continue
-                if name == "townhouse" and b.get("lv", 1) < 2:
-                    continue
-                if name == "midrise" and (b.get("lv", 1) < 2 or b.get("area", 0) < 120):
-                    continue
-                cx, cy, L, W, brg = b["obb"]
-                ent = entrance_dir(b)
-                opts = []
-                for front in (brg, brg + 90, brg + 180, brg + 270):
-                    along = (front - brg) % 180 < 1        # the front axis runs along the map's long side
-                    lz, lx = (L, W) if along else (W, L)   # lot length along the front axis, and across
-                    sf = min(lx / mw, lz / ml) * 1.06
-                    # wide buildings (front on the long side) need the diagonal views, the camera being
-                    # at theta0 + 45 deg: their fronts follow the grid; others may also sit at 45 deg to it
-                    per = 90 if name in DIAG else 45
-                    rel = (front - theta0) % per
-                    err = rel if rel <= per / 2 else rel - per
-                    dfront = abs((front - ent + 180) % 360 - 180)
-                    opts.append((dfront > 100, abs(err) > MAX_ERR, -min(sf, smax), dfront, front - err, sf, err))
-                opts.sort()
-                for o in opts[:2]:
-                    _, bad, _, dfront, snapped, sf, err = o
-                    if bad or sf < smin or dfront > 100:
-                        continue
-                    out.append(dict(b=b, type=name, front=snapped % 360, s=min(sf, smax), err=err))
-                    break
-        return out
-
-    def weight(c):
-        return {"church": 20, "hospital": 20, "school": 3, "midrise": 2, "townhouse": 1}[c["type"]] * (1 - abs(c["err"]) / 30)
-
-    best = max(np.arange(0, 45, 0.5), key=lambda t: sum(weight(c) for c in candidates(t)))
-    cands = candidates(best)
-    print(f"  camera grid angle {best} deg: {len(cands)} buildings fit before the lot checks")
-
-    others = [b for b in blds if not b.get("part_of") and not b.get("hidden")]
-    placed, lots, counts, hidden = [], [], {}, set()
-    order = sorted(cands, key=lambda c: (-weight(c), abs(c["err"])))
-    def try_place(c, off):
-        b, name, B = c["b"], c["type"], BUILDINGS[c["type"]]
-        s, front = c["s"], c["front"]
-        bx0, bx1, bz0, bz1, _ = B["box"]
-        mc = np.array([(bx0 + bx1) / 2, (bz0 + bz1) / 2])
-        piv = np.array(b["obb"][:2]) + off * u(b["obb"][4]) - s * (mc[0] * u(front - 90) + mc[1] * u(front))
-        X, Z = u(front - 90), u(front)
-        lot = B["lot"]
-        xs = np.arange(lot[0], lot[1] + 1e-6, 1.0 / s)
-        zs = np.arange(lot[2], lot[3] + 1e-6, 1.0 / s)
-        g = np.array([(x, z) for x in xs for z in zs])
-        pts = piv + s * (g[:, :1] * X + g[:, 1:] * Z)
-        hide = []
-        for o in others:                                   # no other building under the new lot
-            if o is b or o["id"] in hidden:
-                continue
-            bb = o.get("bb") or [min(o["fp"][0::2]), min(o["fp"][1::2]), max(o["fp"][0::2]), max(o["fp"][1::2])]
-            m = (pts[:, 0] > bb[0]) & (pts[:, 0] < bb[2]) & (pts[:, 1] > bb[1]) & (pts[:, 1] < bb[3])
-            if m.any() and any(pip(x, y, o["fp"]) for x, y in pts[m]):
-                if o.get("a") == "canopy" and name in ("hospital", "school", "church"):
-                    hide.append(o["id"])                   # a covered walkway under the forecourt goes
-                    continue
-                return "lot clashes with " + o["id"] + " " + str(o.get("a"))
-        # roads: not through the building, main roads not across the yard
-        loc = road_pts[:, :2] - piv
-        lx, lz = (loc @ X) / s, (loc @ Z) / s
-        hw = road_pts[:, 2] / s
-        inmass = (lx > bx0 - hw) & (lx < bx1 + hw) & (lz > bz0 - hw) & (lz < bz1 + hw)
-        inlot = (lx > lot[0]) & (lx < lot[1]) & (lz > lot[2]) & (lz < lot[3]) & (road_pts[:, 3] > 0)
-        if inmass.any() or inlot.any():
-            return "road through the " + ("building" if inmass.any() else "lot")
-        for q in lots:                                     # not on top of another new lot
-            loc2 = pts - q["piv"]
-            a2, b2 = (loc2 @ q["X"]) / q["s"], (loc2 @ q["Z"]) / q["s"]
-            L2 = q["lot"]
-            if np.any((a2 > L2[0]) & (a2 < L2[1]) & (b2 > L2[2]) & (b2 < L2[3])):
-                return "overlaps another new lot"
-        return dict(piv=piv, X=X, Z=Z, s=s, lot=lot, hide=hide)
-
-    for c in order:
-        b, name, B = c["b"], c["type"], BUILDINGS[c["type"]]
-        cap = next(r[2] for r in RULES if r[0] == name)
-        if counts.get(name, 0) >= cap:
-            continue
-        bx0, bx1, bz0, bz1, _ = B["box"]
-        along = (c["front"] - b["obb"][4]) % 180 < 13 or (c["front"] - b["obb"][4]) % 180 > 167
-        span = (bz1 - bz0 if along else bx1 - bx0) * c["s"]
-        room = max(0.0, (b["obb"][2] - span) / 2)
-        offs = sorted(np.arange(-room, room + 1e-6, 2.0) if room > 1 else [0.0], key=abs)
-        res = None
-        for off in offs:
-            res = try_place(c, off)
-            if isinstance(res, dict):
-                break
-        if not isinstance(res, dict):
-            if DEBUG and name in DEBUG:
-                print("    ", name, b["id"], res)
-            continue
-        lots.append(res)
-        hidden.update(res["hide"])
-        counts[name] = counts.get(name, 0) + 1
-        piv = res["piv"]
-        placed.append({"id": b["id"], "type": name, "x": round(float(piv[0]), 2), "y": round(float(piv[1]), 2),
-                       "front": round(float(c["front"]), 2), "s": round(float(c["s"]), 3), "was": b.get("a"),
-                       "err": round(float(c["err"]), 1), **({"hide": res["hide"]} if res["hide"] else {})})
-    print("  placed:", counts)
-    for p in placed:
-        if p["type"] in ("church", "hospital", "midrise"):
-            print("   ", p)
-    return best, placed, int(wind)
+    """the town's buildings: every one a new map building (id t<n>) made from its sprite"""
+    rng = np.random.default_rng(77)
+    placed = []
+    for n, p in enumerate(town_layout(BUILDINGS, GRID_DEG)):
+        e = {"id": f"t{n}", **p}
+        if rng.uniform() < ENTER.get(p["type"], 0):
+            e["enter"] = 1
+        placed.append(e)
+    return placed
 
 
 def main():
@@ -388,10 +224,10 @@ def main():
     print("packing")
     town = {"format": 1, "ppm": round(PPM, 4), "buildings": pack_buildings(), "trees": pack_trees(), "fx": pack_fx()}
     print("placing")
-    theta0, placed, wind = placements()
-    town["camera_yaw_deg"] = round((theta0 + 45) % 360, 2)
-    town["grid_deg"] = theta0
-    town["winding"] = wind
+    placed = placements()
+    town["camera_yaw_deg"] = round((GRID_DEG + 45) % 360, 2)
+    town["grid_deg"] = GRID_DEG
+    town["winding"] = 1           # footprints counter-clockwise (x east, y north), as the map's
     town["placements"] = placed
     json.dump(town, open(os.path.join(OUT, "town.json"), "w"), separators=(",", ":"))
     print("  -> public/sprites/town/town.json", os.path.getsize(os.path.join(OUT, "town.json")) // 1024, "KB")

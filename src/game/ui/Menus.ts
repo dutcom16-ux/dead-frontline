@@ -109,7 +109,7 @@ export class Menus {
   about(attr: string, stats: any, storage: string, offline: string) {
     $("aboutBody").innerHTML = `<p><b>DEAD FRONTLINE: FOB WARFARE</b> — a browser 2.5D real-time strategy game set on the real street plan of Toledo City, Cebu.</p>
     <h4>Map data</h4><p>${E(attr)}</p>
-    <p class="fine">Roads, coastline, landmarks and named places come from OpenStreetMap. The map's original buildings have been removed; buildings are being added by hand. Landmark identification is matched by OSM names and tags and should be checked on the ground. No Google Maps imagery, tiles or models were used.</p>
+    <p class="fine">Roads, coastline, landmarks and named places come from OpenStreetMap. The town's buildings are generated along the real streets (landmarks at their real places); they are not the real footprints. Landmark identification is matched by OSM names and tags and should be checked on the ground. No Google Maps imagery, tiles or models were used.</p>
     <table class="kv">${Object.entries(stats || {}).slice(0, 10).map(([k, v]) => `<tr><td class="fine">${E(k)}</td><td>${E(typeof v === "object" ? JSON.stringify(v) : v)}</td></tr>`).join("")}</table>
     <h4>Privacy</h4><p class="fine">No accounts, cookies, ads, trackers, analytics or third-party requests. Saves stay on this device. ${E(storage)} ${E(offline)}</p>
     <h4>Technology</h4><p class="fine">TypeScript game logic on a custom zero-dependency WebGL2 renderer with an orthographic isometric camera, chunk streaming, LOD and culling; 0.5 m navigation grid with A*, road-graph routing and Dijkstra flow fields; esbuild build; installable offline web app (service worker + IndexedDB saves).</p>`;

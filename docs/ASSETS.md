@@ -196,49 +196,60 @@ drawn from the military sprite sheet instead of these models when it loads.
 
 ## Buildings
 
-The map package's buildings were all removed (2026-11-27): every chunk in
-`public/maps/toledo_poblacion.mapz` has an empty building list, and landmarks keep only their centre
-point. Buildings are to be added by hand. Buildings the FOB constructs in a mission are added at run
-time (`MapData.addBuilding`) and still appear. The pre-rendered town's building placements went
-with them (see below); its trees stay. The engine's procedural Philippine archetypes
-(`src/engine/archetypes.js`) and the code-drawn facade and roof textures (`src/engine/atlas.js`) are
-still there for any building added with a footprint.
+The map package has no buildings of its own (its 422 OSM buildings were removed on 2026-11-27). The
+town is made of the pre-rendered buildings below, laid out by `tools/town3d/layout.py`; the game
+makes a map building from each one at start-up (`TownSprites.apply` → `MapData.addBuilding`), and
+buildings the FOB constructs are added the same way during a mission. The engine's procedural
+Philippine archetypes (`src/engine/archetypes.js`) give them their doors and wall strength, and the
+code-drawn facade and roof textures (`src/engine/atlas.js`) are still there for FOB buildings.
 
 ## Pre-rendered town (`public/sprites/town/*`)
 
-All trees are pre-rendered sprites (`src/game/rendering/TownSprites.ts`). The building sprites below
-are kept, but **none is placed at present**: their placements (51, on map buildings) were removed
-with the map's buildings on 2026-11-27, and `town.json` has an empty `placements` list. A placement
-attaches a sprite to a map building by its id, so placing these again needs buildings in the map.
+Every building and tree is a pre-rendered sprite (`src/game/rendering/TownSprites.ts`).
 
-| Sprite | Replaced (before 2026-11-27) | Views × states | Size |
+| Sprite | Placed (4,233 in all) | Views × states | Size |
 |---|---|---|---|
 | Church (stone, bell tower, plaza) | the San Juan de Sahagun shrine (landmark) | 8 × intact/damaged/destroyed | nave walls 8.5 m, tower 20.6 m (×1.3 here) |
-| Hospital (4 storeys, helipad, emergency bay) | Toledo City General Hospital main block | 8 × 3 | 28 × 14 m, 18 m to the stair core |
-| School (3 storeys, 12 classrooms, yard) | school blocks that fit | 8 × 3 | 38 × 9.4 m, ridge 12.6 m |
-| Mid-rise (5 storeys, shops) | larger shop / government buildings that fit | 8 × 3 | 10 × 12 m, 17.6 m |
-| Townhouse (2 storeys, sari-sari store) | two-storey houses and shops that fit | 8 × 3 | 7 × 9 m, ridge 7.6 m |
+| Hospital (4 storeys, helipad, emergency bay) | Toledo City General Hospital (landmark) | 8 × 3 | 28 × 14 m, 18 m to the stair core |
+| School (3 storeys, 12 classrooms, yard) | Consolatrix College, UV Toledo and every other school site (17) | 8 × 3 | 38 × 9.4 m, ridge 12.6 m |
+| Supermarket (hall, canopy, car park) | the public market (landmark) and the large commercial areas and malls (5) | 8 × 3 | 24 × 15 m hall, 29 m lot |
+| Power plant (turbine hall, boiler house, 30 m chimney, tanks, cooling tower, switchyard) | the Toledo Power Company (landmark) | 8 × 3 | 33 × 28 m yard, boiler house 21.6 m |
+| Mid-rise (5 storeys, shops) | the city hall (landmark, ×1.2) and shop blocks in the centre and on the main roads (93) | 8 × 3 | 10 × 12 m, 17.6 m |
+| Townhouse (2 storeys, sari-sari store) | houses and shops along the streets (2,261) | 8 × 3 | 7 × 9 m, ridge 7.6 m |
+| Bungalow (1 storey, porch, carport, fenced lot) | houses along the streets and on back lots (1,854) | 8 × 3 | 11 × 6.4 m, lot 16 × 12 m |
 | Coconut palm, mango tree, banana plant | the 3D cone trees and palms | 2 × 4 sway frames | 11.5 m, 9 m, 4.3 m |
 | Fire, smoke | burning damaged and destroyed sprite buildings | 12- and 24-frame loops | 4.6 m flames, 13 m plume |
 
 * **Source.** `tools/town3d/` holds the models (signed-distance scenes, `church.py`, `school.py`,
-  `hospital.py`, `townhouse.py`, `midrise.py`, `trees.py`) and the renderer. `render_sheet.py <name>
+  `hospital.py`, `townhouse.py`, `midrise.py`, `bungalow.py`, `supermarket.py`, `powerplant.py`,
+  `trees.py`) and the renderer. `render_sheet.py <name>
   <frame> <ax> <ay>` and `build_trees.py` render the frames at 17.3 px/m with the game's camera
   (orthographic, 0.87 rad down, light from the screen's top-left); `game_town.py` packs them at half
-  resolution into 256-colour pages (1.6 MB in all), adds the fire and smoke loops (0.2 MB) and writes `town.json`.
-* **Which buildings.** `game_town.py` matches sprites to map buildings by archetype, size and
-  orientation and checks each new lot (with its yard or forecourt) against other buildings and
-  roads; covered walkways under a forecourt are hidden. The sprites exist in 8 views, so the camera
-  turns in 90° steps from the town's street grid (`camera_yaw_deg`, 64°): wide buildings (school,
-  hospital) are only used on lots that face the grid, which keeps them in the three-quarter views.
+  resolution into 256-colour pages (2.6 MB in all), adds the fire and smoke loops (0.2 MB) and writes `town.json`.
+* **The layout** (`layout.py`, run by `game_town.py`). First the landmarks at their OSM points
+  (searching outward for a lot that fits), school blocks on every school and campus site and a
+  supermarket on every large commercial area or mall. Then the street front: along every street,
+  service lanes last, lots are set back from the kerb on both sides, front to the street, by the
+  land use behind them: shop-houses, five-storey shop blocks and a few bungalows in commercial areas
+  and on the main roads in the centre; bungalows and townhouses in the neighbourhoods; spaced-out
+  houses along country roads. In the town, up to two rows of back lots go behind the street front.
+  Every lot, with its yard, forecourt or car park, must be on land, off the water and every road,
+  clear of the other lots, on ground no steeper than 3 m across, and outside the landing zone, the
+  port and plaza centres, parks, pitches, school and hospital grounds and cemeteries (open ground
+  for fighting and the FOB). The sprites exist in 8 views, so a building faces the street grid
+  (`camera_yaw_deg` 64° = grid 19° + 45°) in 45° steps (wide school, hospital, supermarket and power
+  plant in 90° steps, which keeps them in the three-quarter views), used where the street turns
+  that way within 14°. Seeded, so the town is the same on every build. Churches, the hospital,
+  schools, supermarkets and most shop blocks can be entered; about a quarter of the houses.
 * **In the game.** A sprite building takes the sprite's footprint, height and door, so collision,
   navigation, line of sight, cover and the minimap match the picture. It shows the intact frame,
   the damaged one from a quarter of its structure lost, and the destroyed one from three quarters.
   Sprites are drawn inside the 3D pass: each pixel's depth comes from the view ray hitting the
   building's box (or the tree's) or else the ground, so 3D buildings and sprites hide each other
-  correctly. Trees sway at 4 fps with a random phase.
-* **The camera** still turns in 90° steps from the town's street grid (`camera_yaw_deg`, 64°), the
-  angle the sprites are drawn for, so buildings added from these sprites line up.
+  correctly. Trees sway at 4 fps with a random phase. The power plant's tanks, cooling tower,
+  switchyard, gatehouse, chimney and stair tower are solid annexes of its building.
+* **The camera** turns in 90° steps from the town's street grid (`camera_yaw_deg`, 64°), the angle
+  the sprites are drawn for.
 * **Fire and smoke.** Damaged and destroyed sprite buildings burn: a 1 s flame loop (12 frames,
   full resolution) and a 2 s plume of thick dark smoke (24 frames, half resolution) from
   `tools/town3d/fx.py`, at fire points `tools/town3d/burn.py` takes from each model (burnt-out
@@ -251,7 +262,6 @@ attaches a sprite to a map building by its id, so placing these again needs buil
   single-storey wall, so every house, wall and tree stands taller than them.
 * **Limits.** Pages are half resolution (8.65 px/m): sharp at the default zoom on a phone, soft
   when zoomed right in. Sprite buildings have no interiors (units inside show through, faded).
-  Buildings that do not fit a sprite stay 3D.
 
 ## Audio (`src/game/audio/Sfx.ts`)
 

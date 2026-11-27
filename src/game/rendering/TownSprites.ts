@@ -1,18 +1,20 @@
-// Pre-rendered town: the church, the hospital, school blocks, mid-rise shops and two-storey houses
-// replace their map buildings, and coconut palms, mango trees and banana plants replace the 3D trees.
-// public/sprites/town/town.json comes from tools/town3d/game_town.py, which also chose the buildings.
+// Pre-rendered town: every building of Toledo is a pre-rendered sprite — the church, the hospital, school
+// blocks, the supermarkets and the power plant at their real places, and two-storey houses, bungalows
+// and five-storey shop blocks along the streets — and coconut palms, mango trees and banana plants
+// replace the 3D trees. public/sprites/town/town.json comes from tools/town3d/game_town.py (layout.py
+// lays out the town; the map package itself has no buildings).
 //
 // A sprite building takes the sprite's footprint, height and door (collision, navigation, line of
 // sight, cover and the minimap all follow) and shows its intact, damaged or destroyed frame as the
 // building takes damage. The sprites are drawn for 8 views, so the camera turns in 90° steps from the
-// town's street grid (gridYaw) and every chosen building lines up with the grid.
+// town's street grid (gridYaw) and every building lines up with the grid.
 import type { Battlefield } from "../Battlefield";
 import type { IsoCamera } from "../camera/IsoCamera";
 
 type Frame = [number, number, number, number, number, number];        // x, y, w, h, anchor x, anchor y
-interface BDef { page: string; size: [number, number]; frames: Frame[][]; fp: number[]; ent: [number, number]; box: number[]; lot: number[]; lv: number; h: number; rh: number }
+interface BDef { page: string; size: [number, number]; frames: Frame[][]; fp: number[]; ent: [number, number]; box: number[]; lot: number[]; lv: number; h: number; rh: number; parts?: number[][] }
 interface TDef { views: [number, number, number, number, number, number, number][]; h: number; r: number }
-interface Placement { id: string; type: string; x: number; y: number; front: number; s: number; hide?: string[] }
+interface Placement { id: string; type: string; x: number; y: number; front: number; s: number; hide?: string[]; enter?: number; lm?: string }
 interface FxDef { page: string; ppm: number; frame: number[]; frames: number; fps: number; box: [number, number] }   // box: [metres toward the camera when hidden, height]
 interface TownData {
   ppm: number; camera_yaw_deg: number; winding: number;
@@ -28,6 +30,22 @@ interface Batch { tex: any; ppm: number; slot: any; data: Float32Array; n: numbe
 
 const D2R = Math.PI / 180;
 const u = (c: number): [number, number] => [Math.sin(c * D2R), Math.cos(c * D2R)];
+const bbox = (f: number[]) => {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (let k = 0; k < f.length; k += 2) { x0 = Math.min(x0, f[k]); x1 = Math.max(x1, f[k]); y0 = Math.min(y0, f[k + 1]); y1 = Math.max(y1, f[k + 1]); }
+  return [x0, y0, x1, y1];
+};
+/** what a town building is on the map: category, archetype (doors, wall strength), colours for the minimap */
+const KIND: Record<string, { c: string; a: string; wc: number[]; rc: number[]; wm: string; rm: string }> = {
+  townhouse: { c: "residential", a: "concrete_house_2f", wc: [0.86, 0.8, 0.68], rc: [0.62, 0.3, 0.22], wm: "concrete", rm: "metal_sheet" },
+  bungalow: { c: "residential", a: "concrete_house_1f", wc: [0.91, 0.72, 0.66], rc: [0.2, 0.38, 0.64], wm: "concrete", rm: "metal_sheet" },
+  midrise: { c: "commercial", a: "commercial_block", wc: [0.84, 0.82, 0.76], rc: [0.6, 0.6, 0.58], wm: "concrete", rm: "concrete" },
+  supermarket: { c: "commercial", a: "shop_commercial", wc: [0.9, 0.88, 0.82], rc: [0.66, 0.66, 0.64], wm: "concrete", rm: "concrete" },
+  church: { c: "church", a: "landmark_church", wc: [0.8, 0.76, 0.66], rc: [0.62, 0.6, 0.56], wm: "concrete", rm: "concrete" },
+  school: { c: "school", a: "school_block", wc: [0.9, 0.86, 0.7], rc: [0.3, 0.5, 0.36], wm: "concrete", rm: "metal_sheet" },
+  hospital: { c: "hospital", a: "landmark_hospital", wc: [0.92, 0.92, 0.9], rc: [0.6, 0.62, 0.62], wm: "concrete", rm: "concrete" },
+  powerplant: { c: "industrial", a: "industrial_plant", wc: [0.74, 0.77, 0.8], rc: [0.62, 0.63, 0.64], wm: "metal", rm: "metal_sheet" },
+};
 const hash = (x: number, y: number, k: number) => { const s = Math.sin(x * 12.9898 + y * 78.233 + k * 37.719) * 43758.5453; return s - Math.floor(s); };
 
 export class TownSprites {
@@ -61,47 +79,69 @@ export class TownSprites {
     }
   }
 
-  /** give the chosen map buildings their sprite's footprint, height and door (before the world is built) */
+  /** put the town's buildings on the map (before the world is built): each placement becomes a map
+   *  building with its sprite's footprint, height and door, and its yard structures as solid annexes */
   apply(map: any) {
     const d = this.data;
     if (!d) return;
+    const lms = new Map<string, any>((map.manifest.landmarks || []).map((l: any) => [l.id, l]));
     for (const p of d.placements) {
-      const b = map.getBuilding(p.id), def = d.buildings[p.type];
-      if (!b || !def) continue;
+      const def = d.buildings[p.type];
+      if (!def) continue;
       for (const id of p.hide || []) { const h = map.getBuilding(id); if (h) { h.hidden = true; h.enter = 0; } }
       const X = u(p.front - 90), Z = u(p.front), s = p.s;
       const w = (lx: number, lz: number): [number, number] => [p.x + s * (lx * X[0] + lz * Z[0]), p.y + s * (lx * X[1] + lz * Z[1])];
-      let fp: number[] = [];
-      for (let k = 0; k < def.fp.length; k += 2) fp.push(...w(def.fp[k], def.fp[k + 1]));
+      const ring = (f: number[]) => {                      // to map space, in the map's winding order
+        let fp: number[] = [];
+        for (let k = 0; k < f.length; k += 2) fp.push(...w(f[k], f[k + 1]));
+        const n = fp.length / 2;
+        let area = 0;
+        for (let i = 0; i < n; i++) { const j = (i + 1) % n; area += fp[2 * i] * fp[2 * j + 1] - fp[2 * j] * fp[2 * i + 1]; }
+        const flip = Math.sign(area) !== Math.sign(d.winding || 1);
+        if (flip) { const r: number[] = []; for (let k = n - 1; k >= 0; k--) r.push(fp[2 * k], fp[2 * k + 1]); fp = r; }
+        return { fp, area: Math.abs(area) / 2, flip, n };
+      };
+      const R = ring(def.fp);
       let [ei, et] = def.ent;
-      const n = fp.length / 2;
-      let area = 0;
-      for (let i = 0; i < n; i++) { const j = (i + 1) % n; area += fp[2 * i] * fp[2 * j + 1] - fp[2 * j] * fp[2 * i + 1]; }
-      if (Math.sign(area) !== Math.sign(d.winding || 1)) {                        // the map's winding order
-        const r: number[] = [];
-        for (let k = n - 1; k >= 0; k--) r.push(fp[2 * k], fp[2 * k + 1]);
-        fp = r; ei = (n - 2 - ei + n) % n; et = 1 - et;
-      }
-      const xs = fp.filter((_, k) => k % 2 === 0), ys = fp.filter((_, k) => k % 2 === 1);
-      const bb = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+      if (R.flip) { ei = (R.n - 2 - ei + R.n) % R.n; et = 1 - et; }
       const [bx0, bx1, bz0, bz1] = def.box, c = w((bx0 + bx1) / 2, (bz0 + bz1) / 2);
-      const long = bx1 - bx0 > bz1 - bz0;
-      Object.assign(b, {
-        fp, bb, holes: undefined, ent: [ei, et], h: def.h * s, lv: def.lv, rh: def.rh * s, rf: def.rh > 0 ? "gabled" : "flat",
-        area: Math.abs(area) / 2, ip: c, obb: [c[0], c[1], (long ? bx1 - bx0 : bz1 - bz0) * s, (long ? bz1 - bz0 : bx1 - bx0) * s, ((p.front + (long ? 90 : 0)) % 180 + 180) % 180],
-        sprite: p.type,
-      });
-      b.src = { ...b.src, fp, h: b.h, lv: b.lv, rf: b.rf, rh: b.rh };
-      // a footprint that now reaches into a neighbouring chunk is listed there too
-      const cs = map.cs, home = b.chunk;
-      for (let i = Math.floor(bb[0] / cs); i <= Math.floor(bb[2] / cs); i++)
-        for (let j = Math.floor(bb[1] / cs); j <= Math.floor(bb[3] / cs); j++) {
-          const k = i + "," + j;
-          if (k === home) continue;
-          let ch = map.chunks.get(k);
-          if (!ch) { ch = { i, j, bounds: [i * cs, j * cs, (i + 1) * cs, (j + 1) * cs], buildings: [], xref: [], key: k, meta: null }; map.chunks.set(k, ch); }
-          if (!ch.xref.some((x: any) => x[0] === b.id)) ch.xref.push([b.id, ...home.split(",").map(Number)]);
-        }
+      const long = bx1 - bx0 > bz1 - bz0, brg = ((p.front + (long ? 90 : 0)) % 180 + 180) % 180;
+      const geo = {
+        fp: R.fp, holes: undefined, ent: [ei, et], h: def.h * s, lv: def.lv, rh: def.rh * s, rf: def.rh > 0 ? "gabled" : "flat",
+        area: R.area, ip: c, obb: [c[0], c[1], (long ? bx1 - bx0 : bz1 - bz0) * s, (long ? bz1 - bz0 : bx1 - bx0) * s, brg], brg, sprite: p.type,
+      };
+      let b = map.getBuilding(p.id);
+      if (b) {                                             // an existing map building takes the sprite's shape
+        Object.assign(b, geo);
+        b.src = { ...b.src, fp: b.fp, h: b.h, lv: b.lv, rf: b.rf, rh: b.rh };
+        b.bb = bbox(b.fp);
+        const cs = map.cs, home = b.chunk;                 // a footprint that now reaches into a neighbouring chunk is listed there too
+        for (let i = Math.floor(b.bb[0] / cs); i <= Math.floor(b.bb[2] / cs); i++)
+          for (let j = Math.floor(b.bb[1] / cs); j <= Math.floor(b.bb[3] / cs); j++) {
+            const k = i + "," + j;
+            if (k === home) continue;
+            let ch = map.chunks.get(k);
+            if (!ch) { ch = { i, j, bounds: [i * cs, j * cs, (i + 1) * cs, (j + 1) * cs], buildings: [], xref: [], key: k, meta: null }; map.chunks.set(k, ch); }
+            if (!ch.xref.some((x: any) => x[0] === b.id)) ch.xref.push([b.id, ...home.split(",").map(Number)]);
+          }
+      } else {                                             // a new building of the town
+        const K = KIND[p.type] || KIND.townhouse, lm = p.lm ? lms.get(p.lm) : null;
+        b = map.addBuilding({
+          id: p.id, ...geo, c: K.c, a: K.a, wc: K.wc, rc: K.rc, wm: K.wm, rm: K.rm, nav: p.enter ? "walls" : "solid", los: "full",
+          z: map.groundZ(c[0], c[1]), enter: p.enter ? 1 : 0, town: 1, ...(lm ? { name: lm.name, lm: lm.id } : {}),
+        });
+        if (lm) { lm.main_building = p.id; lm.buildings = [p.id, ...(lm.buildings || []).filter((x: string) => x !== p.id)]; }
+        // yard structures (tanks, cooling tower, switchyard...): solid, drawn as part of the sprite
+        (def.parts || []).forEach(([x0, x1, z0, z1, h], k) => {
+          const A = ring([x1, z1, x0, z1, x0, z0, x1, z0]), ac = w((x0 + x1) / 2, (z0 + z1) / 2);
+          map.addBuilding({
+            id: p.id + "_" + k, fp: A.fp, ent: [0, 0.5], h: h * s, lv: 1, rh: 0, rf: "flat", area: A.area, ip: ac, brg,
+            obb: [ac[0], ac[1], Math.max(x1 - x0, z1 - z0) * s, Math.min(x1 - x0, z1 - z0) * s, ((p.front + (x1 - x0 > z1 - z0 ? 90 : 0)) % 180 + 180) % 180],
+            c: K.c, a: K.a, wc: K.wc, rc: K.rc, wm: K.wm, rm: K.rm, nav: "solid", los: "full", z: map.groundZ(ac[0], ac[1]), enter: 0,
+            sprite: p.type, annex: p.id, town: 1,
+          });
+        });
+      }
       this.placed.push({ b, def, type: p.type, x: p.x, y: p.y, z: NaN, lift: 0, front: p.front, s, cf: Math.cos(p.front * D2R), sf: Math.sin(p.front * D2R) });
     }
   }
@@ -114,9 +154,17 @@ export class TownSprites {
     for (const [p, img] of this.imgs) this.tex.set(p, bf.r.spriteTexture(img));
     const w = bf.world;
     // no trees on the forecourts, yards and plazas of the sprite buildings
-    const lots = this.placed.map((q) => ({ q, lot: q.def.lot }));
-    w.trees = w.trees.filter((t: any) => !lots.some(({ q, lot }) => {
-      const dx = t.x - q.x, dy = t.y - q.y, X = u(q.front - 90), Z = u(q.front);
+    const G = 32, grid = new Map<string, Placed[]>();
+    for (const q of this.placed) {
+      const r = Math.max(...q.def.lot.map(Math.abs)) * q.s * 1.42 + 1;
+      for (let i = Math.floor((q.x - r) / G); i <= Math.floor((q.x + r) / G); i++)
+        for (let j = Math.floor((q.y - r) / G); j <= Math.floor((q.y + r) / G); j++) {
+          const k = i + "," + j, l = grid.get(k);
+          if (l) l.push(q); else grid.set(k, [q]);
+        }
+    }
+    w.trees = w.trees.filter((t: any) => !(grid.get(Math.floor(t.x / G) + "," + Math.floor(t.y / G)) || []).some((q) => {
+      const lot = q.def.lot, dx = t.x - q.x, dy = t.y - q.y, X = u(q.front - 90), Z = u(q.front);
       const lx = (dx * X[0] + dy * X[1]) / q.s, lz = (dx * Z[0] + dy * Z[1]) / q.s;
       return lx > lot[0] - 1 && lx < lot[1] + 1 && lz > lot[2] - 1 && lz < lot[3] + 1;
     }));
