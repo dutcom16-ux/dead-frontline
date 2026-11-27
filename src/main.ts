@@ -36,7 +36,7 @@ class App {
     this.applySettings();
     addEventListener("pointerdown", () => this.sfx.unlock(), { capture: true });
     addEventListener("keydown", () => this.sfx.unlock(), { capture: true });
-    this.pwa = new PWA(() => this.offlineNote());
+    this.pwa = new PWA(() => this.offlineNote(), () => this.newVersion());
     this.pwa.start().catch(() => {});
     this.menus.loading("Opening save storage", 0.02);
     await this.saves.open();
@@ -116,7 +116,16 @@ class App {
     requestAnimationFrame((tt) => this.frame(tt));
   }
   // ---------------------------------------------------------------- flows
+  /** a new version of the game has downloaded and taken over: reload into it now from the menu, or
+   *  after saving when the player is back at the menu (a mission in progress is never cut off) */
+  newVersion() {
+    if (!this.playing || !this.session.game) { location.reload(); return; }
+    this.reloadPending = true;
+    this.hud.toast("A new version of the game has downloaded: it starts when you return to the menu");
+  }
+  reloadPending = false;
   async mainMenu() {
+    if (this.reloadPending) { await this.autosave(); location.reload(); return; }
     this.playing = false; this.controls.enabled = false; $("hud").hidden = true;
     const auto = await this.saves.get("auto");
     $("mContinue").hidden = !auto;
